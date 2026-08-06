@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Budget Tool | Aanaab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<style>
+  :root{
+    --ink:#2E1946;
+    --ink-soft:#472668;
+    --paper:#F6F4FA;
+    --panel:#FFFFFF;
+    --line:#E3DCEF;
+    --grape:#7C3AED;
+    --grape-soft:#EDE2FB;
+    --good:#2F7D5C;
+    --good-bg:#E4F0E9;
+    --bad:#C23B3B;
+    --bad-bg:#FBE7E7;
+    --warn:#B8802F;
+    --warn-bg:#FBF0DC;
+    --muted:#7A7189;
+    --radius:14px;
+    --shadow:0 2px 10px rgba(46,25,70,0.07), 0 1px 2px rgba(46,25,70,0.05);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'Manrope',sans-serif;
+    min-height:100vh;
+    display:flex;
+  }
+  .mono{font-family:'IBM Plex Mono',monospace;}
+
+  /* ---------- Sidebar ---------- */
+  .sidebar{
+    width:230px; min-width:230px;
+    background:var(--ink);
+    color:#EDE7F5;
+    display:flex; flex-direction:column;
+    padding:28px 18px;
+    position:sticky; top:0; height:100vh;
+  }
+  .brand{font-weight:800; font-size:20px; letter-spacing:.3px; margin-bottom:2px;}
+  .brand-sub{font-size:12px; color:#B4A3CC; margin-bottom:34px;}
+  .nav-item{
+    display:flex; align-items:center; gap:10px;
+    padding:11px 14px; border-radius:10px; margin-bottom:4px;
+    cursor:pointer; font-size:14.5px; font-weight:500; color:#D9CEEB;
+    transition:background .15s ease;
+    border:1px solid transparent;
+  }
+  .nav-item:hover{background:rgba(255,255,255,0.07);}
+  .nav-item.active{background:var(--grape); color:#fff; font-weight:700;}
+  .nav-icon{width:18px; text-align:center; opacity:.9;}
+  .sidebar-foot{margin-top:auto; font-size:11.5px; color:#9781B3; line-height:1.7;}
+  .sidebar-foot b{color:#D3C4E8;}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;}
+
+  /* ---------- Main ---------- */
+  .main{flex:1; padding:30px 36px 60px; max-width:1360px;}
+  .page-head{display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:22px; flex-wrap:wrap; gap:12px;}
+  .page-title{font-size:26px; font-weight:800; margin:0 0 4px;}
+  .page-sub{color:var(--muted); font-size:13.5px; margin:0;}
+  .year-select{
+    background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:9px 14px; font-family:'Manrope',sans-serif; font-size:14px; font-weight:700; color:var(--ink);
+  }
+
+  .grid{display:grid; gap:16px;}
+  .grid-4{grid-template-columns:repeat(4,1fr);}
+  .grid-2{grid-template-columns:2fr 1fr;}
+  @media(max-width:1100px){.grid-4{grid-template-columns:repeat(2,1fr);} .grid-2{grid-template-columns:1fr;}}
+
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:20px; box-shadow:var(--shadow);
+  }
+  .kpi-label{font-size:12.5px; color:var(--muted); font-weight:700; margin-bottom:8px;}
+  .kpi-value{font-size:26px; font-weight:800; letter-spacing:.2px;}
+  .kpi-delta{font-size:12.5px; font-weight:700; margin-top:6px; display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border-radius:20px;}
+  .kpi-delta.good{color:var(--good); background:var(--good-bg);}
+  .kpi-delta.bad{color:var(--bad); background:var(--bad-bg);}
+  .kpi-delta.warn{color:var(--warn); background:var(--warn-bg);}
+
+  .section-title{font-size:16px; font-weight:800; margin:30px 0 12px;}
+  .section-title:first-child{margin-top:0;}
+
+  /* Thermometer rows (signature element) */
+  .therm-row{display:flex; align-items:center; gap:14px; padding:11px 0; border-bottom:1px solid var(--line);}
+  .therm-row:last-child{border-bottom:none;}
+  .therm-dept{width:110px; font-weight:700; font-size:13.5px; flex-shrink:0;}
+  .therm-track{flex:1; height:20px; background:var(--grape-soft); border-radius:20px; overflow:hidden; position:relative;}
+  .therm-fill{height:100%; border-radius:20px; transition:width .5s ease;}
+  .therm-nums{width:230px; flex-shrink:0; font-size:12.5px; text-align:right; color:var(--muted);}
+  .therm-nums b{color:var(--ink);}
+  .therm-pct{width:56px; text-align:right; font-weight:800; font-size:13px; flex-shrink:0;}
+
+  table{width:100%; border-collapse:collapse; font-size:13.5px;}
+  th{text-align:left; padding:9px 10px; color:var(--muted); font-weight:700; font-size:12px; border-bottom:2px solid var(--line);}
+  td{padding:9px 10px; border-bottom:1px solid var(--line);}
+  tr:last-child td{border-bottom:none;}
+  td.num, th.num{text-align:right; font-family:'IBM Plex Mono',monospace;}
+  .pill{padding:3px 10px; border-radius:20px; font-size:11.5px; font-weight:700; display:inline-block;}
+  .pill.good{color:var(--good); background:var(--good-bg);}
+  .pill.bad{color:var(--bad); background:var(--bad-bg);}
+  .pill.warn{color:var(--warn); background:var(--warn-bg);}
+  .pill.flat{color:var(--muted); background:var(--grape-soft);}
+
+  .btn{
+    background:var(--ink); color:#fff; border:none; border-radius:10px; padding:10px 18px;
+    font-family:'Manrope',sans-serif; font-weight:700; font-size:13.5px; cursor:pointer;
+  }
+  .btn:hover{background:var(--ink-soft);}
+  .btn.gold{background:var(--grape); color:#fff;}
+  .btn.gold:hover{background:#6b2fd6;}
+  .btn.ghost{background:transparent; color:var(--ink); border:1px solid var(--line);}
+  .btn.danger{background:var(--bad-bg); color:var(--bad);}
+  .btn:disabled{opacity:.5; cursor:not-allowed;}
+
+  input, select{
+    font-family:'Manrope',sans-serif; border:1px solid var(--line); border-radius:8px;
+    padding:8px 10px; font-size:13.5px; background:#fff; color:var(--ink); width:100%;
+  }
+  label{font-size:12px; font-weight:700; color:var(--muted); display:block; margin-bottom:5px;}
+
+  .empty{text-align:center; padding:60px 20px; color:var(--muted);}
+  .empty h3{color:var(--ink); font-size:17px;}
+
+  .setup-wrap{max-width:560px; margin:60px auto;}
+  .badge{display:inline-block; background:var(--grape-soft); color:#5B21B0; font-size:11.5px; font-weight:700; padding:3px 10px; border-radius:20px; margin-bottom:14px;}
+
+  .modal-bg{position:fixed; inset:0; background:rgba(46,25,70,.45); display:none; align-items:center; justify-content:center; z-index:50;}
+  .modal-bg.open{display:flex;}
+  .modal{background:#fff; border-radius:16px; padding:26px; width:640px; max-width:92vw; max-height:86vh; overflow:auto; box-shadow:0 20px 60px rgba(0,0,0,.25);}
+  .month-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:10px;}
+  .month-grid div span{display:block; font-size:11px; color:var(--muted); margin-bottom:3px;}
+
+  .line-row{display:grid; grid-template-columns:2fr 1fr 90px; gap:8px; align-items:end; padding:10px 0; border-bottom:1px solid var(--line);}
+  .toast{position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:var(--ink); color:#fff; padding:12px 22px; border-radius:10px; font-size:13.5px; font-weight:700; z-index:100; display:none; box-shadow:var(--shadow);}
+  ::-webkit-scrollbar{width:9px; height:9px;}
+  ::-webkit-scrollbar-thumb{background:#D8CBEA; border-radius:20px;}
+  .loader{display:flex; align-items:center; gap:8px; color:var(--muted); font-size:13px; padding:14px 0;}
+  .spin{width:14px;height:14px;border:2px solid var(--line); border-top-color:var(--grape); border-radius:50%; animation:sp .7s linear infinite;}
+  @keyframes sp{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+
+<div class="sidebar" id="sidebar" style="display:none;">
+  <div>
+    <div class="brand">Aanaab</div>
+    <div class="brand-sub">Budget & Spend Monitoring</div>
+  </div>
+  <div class="nav-item active" data-page="dashboard"><span class="nav-icon">◆</span> Dashboard</div>
+  <div class="nav-item" data-page="builder"><span class="nav-icon">＋</span> Budget Builder</div>
+  <div class="nav-item" data-page="variance"><span class="nav-icon">⇄</span> Variance Analysis</div>
+  <div class="nav-item" data-page="detail"><span class="nav-icon">▤</span> Department Detail</div>
+  <div class="nav-item" data-page="setup"><span class="nav-icon">⚙</span> Settings</div>
+  <div class="sidebar-foot">
+    <span class="dot" id="connDot" style="background:#C23B3B;"></span><b id="connText">Not connected</b><br>
+    Last sync: <span id="lastSync">—</span>
+  </div>
+</div>
+
+<div class="main" id="main">
+  <!-- SETUP SCREEN (shown first-run) -->
+  <div id="page-setup-first" class="setup-wrap">
+    <span class="badge">First-time setup</span>
+    <h2 style="margin:0 0 8px; font-size:24px;">Connect to your budget sheet</h2>
+    <p style="color:var(--muted); font-size:14px; line-height:1.8;">
+      Paste the Web App URL for the Google Apps Script backend (deployed from the same Google Sheet
+      that's linked to Odoo). Setup instructions and the backend code are in the attached
+      <span class="mono">Code.gs</span> / README files.
+    </p>
+    <label style="margin-top:18px;">Web App URL</label>
+    <input id="setupUrlInput" placeholder="https://script.google.com/macros/s/XXXX/exec">
+    <button class="btn gold" style="margin-top:14px; width:100%;" onclick="saveSetupUrl()">Connect and start</button>
+  </div>
+
+  <div id="app-pages" style="display:none;">
+    <!-- DASHBOARD -->
+    <div id="page-dashboard">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Dashboard</div>
+          <div class="page-sub">Spend vs. budget across all departments</div>
+        </div>
+        <select class="year-select" id="yearSelect" onchange="onYearChange()"></select>
+      </div>
+
+      <div class="grid grid-4" id="kpiRow"></div>
+
+      <div class="section-title">Percent of budget spent, by department</div>
+      <div class="card" id="thermCard"></div>
+
+      <div class="grid grid-2" style="margin-top:22px;">
+        <div class="card">
+          <div class="section-title" style="margin-top:0;">Budget vs. actual by month</div>
+          <canvas id="trendChart" height="230"></canvas>
+        </div>
+        <div class="card">
+          <div class="section-title" style="margin-top:0;">Budget split by department</div>
+          <canvas id="pieChart" height="230"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- BUILDER -->
+    <div id="page-builder" style="display:none;">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Build / edit budget</div>
+          <div class="page-sub">Add line items per department and set the monthly split</div>
+        </div>
+        <div style="display:flex; gap:10px;">
+          <select class="year-select" id="builderYear"></select>
+          <button class="btn ghost" onclick="addNewYear()">+ New year</button>
+        </div>
+      </div>
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+          <select id="builderDept" style="max-width:220px;" onchange="renderBuilderTable()"></select>
+          <button class="btn gold" onclick="openLineModal()">+ Add line item</button>
+        </div>
+        <table id="builderTable"></table>
+      </div>
+    </div>
+
+    <!-- VARIANCE -->
+    <div id="page-variance" style="display:none;">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Variance Analysis</div>
+          <div class="page-sub">Budget vs. actual by department and account</div>
+        </div>
+        <select class="year-select" id="varianceYear"></select>
+      </div>
+      <div class="card">
+        <table id="varianceTable"></table>
+      </div>
+    </div>
+
+    <!-- DETAIL -->
+    <div id="page-detail" style="display:none;">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Department Detail</div>
+          <div class="page-sub">Monthly spend for every GL account in the department</div>
+        </div>
+        <div style="display:flex; gap:10px;">
+          <select class="year-select" id="detailYear"></select>
+          <select class="year-select" id="detailDept"></select>
+        </div>
+      </div>
+      <div class="card">
+        <table id="detailTable"></table>
+      </div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div id="page-setup" style="display:none;">
+      <div class="page-title">Settings</div>
+      <div class="card" style="max-width:600px; margin-top:16px;">
+        <label>Web App URL</label>
+        <input id="settingsUrlInput">
+        <button class="btn gold" style="margin-top:12px;" onclick="saveSettingsUrl()">Save and reconnect</button>
+        <div style="margin-top:16px; font-size:12.5px; color:var(--muted); line-height:1.8;">
+          Actuals are read from the <span class="mono">Actual_Data</span> sheet, which should be kept
+          updated monthly by your existing Odoo sync. Budget is read from and written to
+          <span class="mono">Budget_Data</span>.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Line item modal -->
+<div class="modal-bg" id="lineModalBg">
+  <div class="modal">
+    <h3 id="lineModalTitle" style="margin-top:0;">Add budget line item</h3>
+    <label>Department</label>
+    <select id="lineDept"></select>
+    <label style="margin-top:10px;">GL Account name</label>
+    <input id="lineGL" placeholder="e.g. 625000 Dues and Subscriptions">
+    <label style="margin-top:10px;">Category</label>
+    <select id="lineCategory"><option value="Opex">Operating expense</option><option value="Payroll">Payroll</option></select>
+
+    <div style="display:flex; gap:8px; margin-top:14px;">
+      <button class="btn ghost" style="flex:1;" onclick="fillEqual()">Split evenly over 12 months</button>
+    </div>
+    <label style="margin-top:6px;">Annual total (for even split)</label>
+    <input id="lineAnnualTotal" type="number" placeholder="0">
+
+    <div class="month-grid" id="lineMonths"></div>
+
+    <div style="display:flex; gap:10px; margin-top:20px;">
+      <button class="btn gold" style="flex:1;" onclick="saveLine()">Save line item</button>
+      <button class="btn ghost" onclick="closeLineModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const DEPTS = ['HR','Marketing','Content','B2B','Operation','Finance','Projects','CEO','Q&PL','Product','B2G'];
+let API_URL = localStorage.getItem('budgetToolApiUrl') || '';
+let STATE = { year:new Date().getFullYear(), budget:[], actual:[], years:[] };
+let trendChartInst=null, pieChartInst=null;
+
+function fmt(n){ n = Number(n)||0; return n.toLocaleString('en-US',{maximumFractionDigits:0}); }
+function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none',2600); }
+
+// ---------- Boot ----------
+window.addEventListener('DOMContentLoaded', ()=>{
+  populateSelect('lineDept', DEPTS);
+  document.getElementById('lineMonths').innerHTML = MONTHS.map((m,i)=>
+    `<div><span>${m}</span><input type="number" class="mono lineMonthInput" data-m="${i+1}" placeholder="0"></div>`).join('');
+  document.querySelectorAll('.nav-item').forEach(el=>el.addEventListener('click',()=>navTo(el.dataset.page)));
+
+  if (API_URL){ document.getElementById('settingsUrlInput').value = API_URL; boot(); }
+  else { document.getElementById('page-setup-first').style.display='block'; }
+});
+
+function saveSetupUrl(){
+  const v = document.getElementById('setupUrlInput').value.trim();
+  if(!v){ toast('Please enter the Web App URL'); return; }
+  API_URL = v; localStorage.setItem('budgetToolApiUrl', v);
+  document.getElementById('settingsUrlInput').value = v;
+  boot();
+}
+function saveSettingsUrl(){
+  const v = document.getElementById('settingsUrlInput').value.trim();
+  if(!v) return;
+  API_URL = v; localStorage.setItem('budgetToolApiUrl', v);
+  toast('Saved — reconnecting...');
+  boot();
+}
+
+async function apiGet(params){
+  const url = API_URL + (API_URL.includes('?')?'&':'?') + params;
+  const res = await fetch(url);
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  return res.json();
+}
+async function apiPost(payload){
+  const res = await fetch(API_URL, {method:'POST', body: JSON.stringify(payload)});
+  return res.json();
+}
+
+async function boot(){
+  document.getElementById('page-setup-first').style.display='none';
+  document.getElementById('sidebar').style.display='flex';
+  document.getElementById('app-pages').style.display='block';
+  setConn(false);
+  try{
+    const yearsRes = await apiGet('action=years');
+    STATE.years = (yearsRes.years && yearsRes.years.length) ? yearsRes.years : [new Date().getFullYear()];
+    STATE.year = STATE.years[STATE.years.length-1];
+    ['yearSelect','builderYear','varianceYear','detailYear'].forEach(id=>{
+      populateSelect(id, STATE.years, true);
+      document.getElementById(id).value = STATE.year;
+    });
+    populateSelect('detailDept', DEPTS);
+    populateSelect('builderDept', DEPTS);
+    await loadYear(STATE.year);
+    setConn(true);
+  }catch(err){
+    setConn(false);
+    toast('Could not connect — check the URL and that the Web App is deployed');
+    console.error(err);
+  }
+}
+
+function setConn(ok){
+  document.getElementById('connDot').style.background = ok? '#3FAE7A':'#C23B3B';
+  document.getElementById('connText').textContent = ok? 'Connected' : 'Not connected';
+  if(ok) document.getElementById('lastSync').textContent = new Date().toLocaleString('en-US');
+}
+
+function populateSelect(id, arr, isYear){
+  const el = document.getElementById(id); if(!el) return;
+  el.innerHTML = arr.map(v=>`<option value="${v}">${v}</option>`).join('');
+}
+
+async function loadYear(year){
+  STATE.year = year;
+  const data = await apiGet('year='+year);
+  STATE.budget = data.budget || [];
+  STATE.actual = data.actual || [];
+  renderAll();
+}
+
+function onYearChange(){ loadYear(document.getElementById('yearSelect').value); }
+
+function navTo(page){
+  document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active', el.dataset.page===page));
+  ['dashboard','builder','variance','detail','setup'].forEach(p=>{
+    document.getElementById('page-'+p).style.display = (p===page)?'block':'none';
+  });
+  if(page==='builder') renderBuilderTable();
+  if(page==='variance') renderVarianceTable();
+  if(page==='detail') renderDetailTable();
+}
+
+// ---------- Aggregation helpers ----------
+function deptBudgetTotal(dept){ return STATE.budget.filter(r=>r.Dept===dept).reduce((s,r)=>s+Number(r.Amount||0),0); }
+function deptActualTotal(dept){ return STATE.actual.filter(r=>r.Dept===dept).reduce((s,r)=>s+Number(r.Amount||0),0); }
+function monthTotals(rows){ const arr=Array(12).fill(0); rows.forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) arr[m-1]+=Number(r.Amount||0); }); return arr; }
+
+// ---------- Dashboard ----------
+function renderAll(){
+  const totalBudget = STATE.budget.reduce((s,r)=>s+Number(r.Amount||0),0);
+  const totalActual = STATE.actual.reduce((s,r)=>s+Number(r.Amount||0),0);
+  const remaining = totalBudget - totalActual;
+  const pctUsed = totalBudget? (totalActual/totalBudget*100):0;
+  const now = new Date();
+  const monthsElapsed = (Number(STATE.year)===now.getFullYear())? now.getMonth()+1 : 12;
+  const expectedPct = monthsElapsed/12*100;
+  const paceDelta = pctUsed - expectedPct;
+
+  document.getElementById('kpiRow').innerHTML = `
+    ${kpi('Total budget', fmt(totalBudget), '', 'flat')}
+    ${kpi('Actual spend', fmt(totalActual), pctUsed.toFixed(0)+'% of budget', pctUsed>100?'bad':(pctUsed>expectedPct+10?'warn':'good'))}
+    ${kpi('Remaining', fmt(remaining), remaining<0?'Over budget':'Available', remaining<0?'bad':'good')}
+    ${kpi('Spend pace', (paceDelta>=0?'+':'')+paceDelta.toFixed(1)+' pts', paceDelta>0?'Ahead of schedule':'On schedule', paceDelta>10?'bad':(paceDelta>0?'warn':'good'))}
+  `;
+
+  // thermometers
+  const rows = DEPTS.map(d=>({d, b:deptBudgetTotal(d), a:deptActualTotal(d)})).filter(r=>r.b>0||r.a>0);
+  document.getElementById('thermCard').innerHTML = rows.map(r=>{
+    const pct = r.b? (r.a/r.b*100):0;
+    const color = pct>100? 'var(--bad)' : (pct>expectedPct+10? 'var(--warn)':'var(--good)');
+    return `<div class="therm-row">
+      <div class="therm-dept">${r.d}</div>
+      <div class="therm-track"><div class="therm-fill" style="width:${Math.min(pct,100)}%; background:${color};"></div></div>
+      <div class="therm-pct" style="color:${color};">${pct.toFixed(0)}%</div>
+      <div class="therm-nums mono">${fmt(r.a)} / ${fmt(r.b)}</div>
+    </div>`;
+  }).join('') || emptyState('No budget data for this year yet');
+
+  // trend chart
+  const bM = monthTotals(STATE.budget), aM = monthTotals(STATE.actual);
+  if(trendChartInst) trendChartInst.destroy();
+  trendChartInst = new Chart(document.getElementById('trendChart'), {
+    type:'bar',
+    data:{ labels:MONTHS, datasets:[
+      {label:'Budget', data:bM, backgroundColor:'#E3DCEF', borderRadius:5},
+      {label:'Actual', data:aM, backgroundColor:'#7C3AED', borderRadius:5}
+    ]},
+    options:{ responsive:true, plugins:{legend:{position:'bottom', labels:{font:{family:'Manrope'}}}}, scales:{y:{beginAtZero:true}} }
+  });
+
+  // pie chart
+  const pieData = rows.map(r=>r.b);
+  if(pieChartInst) pieChartInst.destroy();
+  pieChartInst = new Chart(document.getElementById('pieChart'), {
+    type:'doughnut',
+    data:{ labels: rows.map(r=>r.d), datasets:[{ data:pieData,
+      backgroundColor:['#2E1946','#7C3AED','#2F7D5C','#C23B3B','#9781B3','#A879E0','#B8802F','#472668','#5B21B0','#8E6BC4','#C4B0E3'] }]},
+    options:{ responsive:true, plugins:{legend:{position:'bottom', labels:{font:{family:'Manrope'}, boxWidth:10}}} }
+  });
+}
+
+function kpi(label,val,delta,cls){
+  return `<div class="card">
+    <div class="kpi-label">${label}</div>
+    <div class="kpi-value mono">${val}</div>
+    ${delta? `<div class="kpi-delta ${cls}">${delta}</div>`:''}
+  </div>`;
+}
+function emptyState(msg){ return `<div class="empty"><h3>${msg}</h3></div>`; }
+
+// ---------- Builder ----------
+function addNewYear(){
+  const y = prompt('Enter the new year (e.g. 2027):');
+  if(!y) return;
+  const yr = parseInt(y,10); if(!yr) return;
+  if(!STATE.years.includes(yr)){ STATE.years.push(yr); STATE.years.sort();
+    ['yearSelect','builderYear','varianceYear','detailYear'].forEach(id=>populateSelect(id, STATE.years, true));
+  }
+  document.getElementById('builderYear').value = yr;
+  loadYear(yr).then(renderBuilderTable);
+}
+
+function renderBuilderTable(){
+  const dept = document.getElementById('builderDept').value;
+  const rows = STATE.budget.filter(r=>r.Dept===dept);
+  const byGL = {};
+  rows.forEach(r=>{ byGL[r.GLAccount] = byGL[r.GLAccount]||{cat:r.Category,total:0}; byGL[r.GLAccount].total += Number(r.Amount||0); });
+  const keys = Object.keys(byGL);
+  let html = `<tr><th>Account</th><th>Category</th><th class="num">Annual total</th><th></th></tr>`;
+  if(!keys.length){ html += `<tr><td colspan="4">${emptyState('No line items for this department yet — add one')}</td></tr>`; }
+  keys.forEach(k=>{
+    html += `<tr>
+      <td>${k}</td>
+      <td><span class="pill flat">${byGL[k].cat==='Payroll'?'Payroll':'Opex'}</span></td>
+      <td class="num mono">${fmt(byGL[k].total)}</td>
+      <td><button class="btn ghost" style="padding:5px 10px; font-size:12px;" onclick="deleteLine('${dept}','${k.replace(/'/g,"\\'")}')">Delete</button></td>
+    </tr>`;
+  });
+  document.getElementById('builderTable').innerHTML = html;
+}
+
+let editingContext = null;
+function openLineModal(){
+  document.getElementById('lineDept').value = document.getElementById('builderDept').value;
+  document.getElementById('lineGL').value=''; document.getElementById('lineAnnualTotal').value='';
+  document.querySelectorAll('.lineMonthInput').forEach(i=>i.value='');
+  document.getElementById('lineModalBg').classList.add('open');
+}
+function closeLineModal(){ document.getElementById('lineModalBg').classList.remove('open'); }
+function fillEqual(){
+  const total = Number(document.getElementById('lineAnnualTotal').value)||0;
+  const per = Math.round((total/12)*100)/100;
+  document.querySelectorAll('.lineMonthInput').forEach(i=>i.value=per);
+}
+async function saveLine(){
+  const dept = document.getElementById('lineDept').value;
+  const gl = document.getElementById('lineGL').value.trim();
+  const cat = document.getElementById('lineCategory').value;
+  if(!gl){ toast('Enter an account name'); return; }
+  const rows = [];
+  document.querySelectorAll('.lineMonthInput').forEach(inp=>{
+    const amt = Number(inp.value)||0;
+    rows.push({year:STATE.year, dept, glAccount:gl, category:cat, month:Number(inp.dataset.m), amount:amt});
+  });
+  toast('Saving...');
+  const res = await apiPost({action:'saveBudget', rows});
+  if(res.ok){ toast('Line item saved'); closeLineModal(); await loadYear(STATE.year); renderBuilderTable(); }
+  else toast('Error: '+res.error);
+}
+async function deleteLine(dept, glAccount){
+  if(!confirm('Delete this line item permanently?')) return;
+  const res = await apiPost({action:'deleteBudgetLine', year:STATE.year, dept, glAccount});
+  if(res.ok){ toast('Deleted'); await loadYear(STATE.year); renderBuilderTable(); }
+}
+
+// ---------- Variance ----------
+function renderVarianceTable(){
+  let html = `<tr><th>Department</th><th class="num">Budget</th><th class="num">Actual</th><th class="num">Variance</th><th class="num">%</th><th>Status</th></tr>`;
+  DEPTS.forEach(d=>{
+    const b=deptBudgetTotal(d), a=deptActualTotal(d);
+    if(b===0 && a===0) return;
+    const diff = b-a; const pct = b? (a/b*100):0;
+    const status = pct>105? {t:'Over budget',c:'bad'} : (pct<80? {t:'Under-spent',c:'warn'} : {t:'On track',c:'good'});
+    html += `<tr><td><b>${d}</b></td><td class="num mono">${fmt(b)}</td><td class="num mono">${fmt(a)}</td>
+      <td class="num mono" style="color:${diff<0?'var(--bad)':'var(--good)'}">${fmt(diff)}</td>
+      <td class="num mono">${pct.toFixed(0)}%</td>
+      <td><span class="pill ${status.c}">${status.t}</span></td></tr>`;
+  });
+  document.getElementById('varianceTable').innerHTML = html;
+}
+
+// ---------- Detail ----------
+function renderDetailTable(){
+  const dept = document.getElementById('detailDept').value;
+  const b = STATE.budget.filter(r=>r.Dept===dept), a = STATE.actual.filter(r=>r.Dept===dept);
+  const glSet = new Set([...b.map(r=>r.GLAccount), ...a.map(r=>r.GLAccount)]);
+  let html = `<tr><th>Account</th><th class="num">Annual budget</th><th class="num">Actual to date</th><th class="num">Variance</th></tr>`;
+  glSet.forEach(gl=>{
+    const bt = b.filter(r=>r.GLAccount===gl).reduce((s,r)=>s+Number(r.Amount||0),0);
+    const at = a.filter(r=>r.GLAccount===gl).reduce((s,r)=>s+Number(r.Amount||0),0);
+    html += `<tr><td>${gl}</td><td class="num mono">${fmt(bt)}</td><td class="num mono">${fmt(at)}</td>
+      <td class="num mono" style="color:${bt-at<0?'var(--bad)':'var(--good)'}">${fmt(bt-at)}</td></tr>`;
+  });
+  document.getElementById('detailTable').innerHTML = html || `<tr><td>${emptyState('No data')}</td></tr>`;
+}
+document.addEventListener('change', (e)=>{
+  if(e.target.id==='detailDept') renderDetailTable();
+  if(e.target.id==='builderYear') loadYear(e.target.value).then(renderBuilderTable);
+  if(e.target.id==='varianceYear') loadYear(e.target.value).then(renderVarianceTable);
+  if(e.target.id==='detailYear') loadYear(e.target.value).then(renderDetailTable);
+});
+</script>
+</body>
+</html>
