@@ -336,7 +336,7 @@
 
 <script>
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const DEPTS = ['HR','Marketing','Content','B2B','Operation','Finance','Projects','CEO','Q&PL','Product','B2G'];
+const DEPTS = ['HR','Marketing','Content','B2B','Operation','Finance','Projects','CEO','Q&PL','Product','B2G']; // fallback only, for the "add new line" dropdown before any data exists
 let API_URL = localStorage.getItem('budgetToolApiUrl') || '';
 let STATE = { year:new Date().getFullYear(), budget:[], actual:[], years:[] };
 let trendChartInst=null, pieChartInst=null, varianceChartInst=null, waterfallChartInst=null;
@@ -381,6 +381,17 @@ async function apiPost(payload){
   return res.json();
 }
 
+// Real department names come from the data itself (Odoo analytic accounts), not a
+// fixed list — the fixed DEPTS above is only a fallback for picking a department
+// before any budget/actual data exists yet.
+function getDisplayDepts(){
+  const set = new Set();
+  STATE.budget.forEach(r=>{ if(r.Dept) set.add(r.Dept); });
+  STATE.actual.forEach(r=>{ if(r.Dept) set.add(r.Dept); });
+  if(set.size===0) DEPTS.forEach(d=>set.add(d));
+  return [...set].sort();
+}
+
 async function boot(){
   document.getElementById('page-setup-first').style.display='none';
   document.getElementById('sidebar').style.display='flex';
@@ -394,8 +405,6 @@ async function boot(){
       populateSelect(id, STATE.years, true);
       document.getElementById(id).value = STATE.year;
     });
-    populateSelect('detailDept', DEPTS);
-    populateSelect('builderDept', DEPTS);
     setConn(true);
     await loadYear(STATE.year);
   }catch(err){
@@ -421,6 +430,10 @@ async function loadYear(year){
   const data = await apiGet('year='+year);
   STATE.budget = data.budget || [];
   STATE.actual = data.actual || [];
+  const depts = getDisplayDepts();
+  populateSelect('detailDept', depts);
+  populateSelect('builderDept', depts);
+  populateSelect('lineDept', depts);
   try{ renderAll(); }catch(renderErr){ console.error('Render error (data loaded fine):', renderErr); }
 }
 
@@ -551,7 +564,7 @@ function renderAll(){
   `;
 
   // thermometers
-  const rows = DEPTS.map(d=>({d, b:deptBudgetTotal(d), a:deptActualTotal(d)})).filter(r=>r.b>0||r.a>0);
+  const rows = getDisplayDepts().map(d=>({d, b:deptBudgetTotal(d), a:deptActualTotal(d)})).filter(r=>r.b>0||r.a>0);
   document.getElementById('thermCard').innerHTML = rows.map(r=>{
     const pct = r.b? (r.a/r.b*100):0;
     const color = pct>100? 'var(--bad)' : (pct>expectedPct+10? 'var(--warn)':'var(--good)');
@@ -665,7 +678,7 @@ async function deleteLine(dept, glAccount){
 
 // ---------- Variance ----------
 function renderVarianceTable(){
-  const deptRows = DEPTS.map(d=>({d, b:deptBudgetTotal(d), a:deptActualTotal(d)})).filter(r=>r.b!==0 || r.a!==0);
+  const deptRows = getDisplayDepts().map(d=>({d, b:deptBudgetTotal(d), a:deptActualTotal(d)})).filter(r=>r.b!==0 || r.a!==0);
 
   if(typeof Chart !== 'undefined'){
     if(varianceChartInst) varianceChartInst.destroy();
