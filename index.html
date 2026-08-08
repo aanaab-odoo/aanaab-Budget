@@ -160,6 +160,7 @@
   <div class="nav-item active" data-page="dashboard"><span class="nav-icon">◆</span> Dashboard</div>
   <div class="nav-item" data-page="builder"><span class="nav-icon">＋</span> Budget Builder</div>
   <div class="nav-item" data-page="variance"><span class="nav-icon">⇄</span> Variance Analysis</div>
+  <div class="nav-item" data-page="income"><span class="nav-icon">Σ</span> Income Statement</div>
   <div class="nav-item" data-page="detail"><span class="nav-icon">▤</span> Department Detail</div>
   <div class="nav-item" data-page="setup"><span class="nav-icon">⚙</span> Settings</div>
   <div class="sidebar-foot">
@@ -198,6 +199,9 @@
 
       <div class="section-title">Percent of budget spent, by department</div>
       <div class="card" id="thermCard"></div>
+
+      <div class="section-title">Biggest variances (budget vs. actual)</div>
+      <div class="grid grid-2" id="topVariancesCard"></div>
 
       <div class="grid grid-2" style="margin-top:22px;">
         <div class="card">
@@ -242,7 +246,23 @@
         <select class="year-select" id="varianceYear"></select>
       </div>
       <div class="card">
+        <canvas id="varianceChart" height="220" style="margin-bottom:20px;"></canvas>
         <table id="varianceTable"></table>
+      </div>
+    </div>
+
+    <!-- INCOME STATEMENT -->
+    <div id="page-income" style="display:none;">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Income Statement</div>
+          <div class="page-sub">Budget vs. actual, rolled up by Revenue / COGS / Opex / Payroll across all departments</div>
+        </div>
+        <select class="year-select" id="incomeYear"></select>
+      </div>
+      <div class="card">
+        <canvas id="waterfallChart" height="260" style="margin-bottom:20px;"></canvas>
+        <table id="incomeTable"></table>
       </div>
     </div>
 
@@ -259,6 +279,7 @@
         </div>
       </div>
       <div class="card">
+        <input id="detailSearch" placeholder="Filter by account name..." style="max-width:280px; margin-bottom:14px;">
         <table id="detailTable"></table>
       </div>
     </div>
@@ -288,8 +309,13 @@
     <select id="lineDept"></select>
     <label style="margin-top:10px;">GL Account name</label>
     <input id="lineGL" placeholder="e.g. 625000 Dues and Subscriptions">
-    <label style="margin-top:10px;">Category</label>
-    <select id="lineCategory"><option value="Opex">Operating expense</option><option value="Payroll">Payroll</option></select>
+    <label style="margin-top:10px;">Account type</label>
+    <select id="lineCategory">
+      <option value="Revenue">Revenue</option>
+      <option value="COGS">COGS</option>
+      <option value="Opex" selected>Operating expense</option>
+      <option value="Payroll">Payroll</option>
+    </select>
 
     <div style="display:flex; gap:8px; margin-top:14px;">
       <button class="btn ghost" style="flex:1;" onclick="fillEqual()">Split evenly over 12 months</button>
@@ -313,7 +339,7 @@ const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov
 const DEPTS = ['HR','Marketing','Content','B2B','Operation','Finance','Projects','CEO','Q&PL','Product','B2G'];
 let API_URL = localStorage.getItem('budgetToolApiUrl') || '';
 let STATE = { year:new Date().getFullYear(), budget:[], actual:[], years:[] };
-let trendChartInst=null, pieChartInst=null;
+let trendChartInst=null, pieChartInst=null, varianceChartInst=null, waterfallChartInst=null;
 
 function fmt(n){ n = Number(n)||0; return n.toLocaleString('en-US',{maximumFractionDigits:0}); }
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none',2600); }
@@ -364,14 +390,14 @@ async function boot(){
     const yearsRes = await apiGet('action=years');
     STATE.years = (yearsRes.years && yearsRes.years.length) ? yearsRes.years : [new Date().getFullYear()];
     STATE.year = STATE.years[STATE.years.length-1];
-    ['yearSelect','builderYear','varianceYear','detailYear'].forEach(id=>{
+    ['yearSelect','builderYear','varianceYear','incomeYear','detailYear'].forEach(id=>{
       populateSelect(id, STATE.years, true);
       document.getElementById(id).value = STATE.year;
     });
     populateSelect('detailDept', DEPTS);
     populateSelect('builderDept', DEPTS);
-    await loadYear(STATE.year);
     setConn(true);
+    await loadYear(STATE.year);
   }catch(err){
     setConn(false);
     toast('Could not connect — check the URL and that the Web App is deployed');
@@ -395,25 +421,116 @@ async function loadYear(year){
   const data = await apiGet('year='+year);
   STATE.budget = data.budget || [];
   STATE.actual = data.actual || [];
-  renderAll();
+  try{ renderAll(); }catch(renderErr){ console.error('Render error (data loaded fine):', renderErr); }
 }
 
 function onYearChange(){ loadYear(document.getElementById('yearSelect').value); }
 
 function navTo(page){
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active', el.dataset.page===page));
-  ['dashboard','builder','variance','detail','setup'].forEach(p=>{
+  ['dashboard','builder','variance','income','detail','setup'].forEach(p=>{
     document.getElementById('page-'+p).style.display = (p===page)?'block':'none';
   });
   if(page==='builder') renderBuilderTable();
   if(page==='variance') renderVarianceTable();
+  if(page==='income') renderIncomeStatement();
   if(page==='detail') renderDetailTable();
+}
+
+// ---------- Income Statement ----------
+function typeTotals(rows, type){ return rows.filter(r=>(r.AccountType||'Opex')===type).reduce((s,r)=>s+Number(r.Amount||0),0); }
+function renderIncomeStatement(){
+  const types = ['Revenue','COGS','Opex','Payroll'];
+  const b = {}, a = {};
+  types.forEach(t=>{ b[t]=typeTotals(STATE.budget,t); a[t]=typeTotals(STATE.actual,t); });
+  const gpB = b.Revenue - b.COGS, gpA = a.Revenue - a.COGS;
+  const niB = gpB - b.Opex - b.Payroll, niA = gpA - a.Opex - a.Payroll;
+
+  if(typeof Chart !== 'undefined'){
+    const steps = [
+      {label:'Revenue', value: a.Revenue},
+      {label:'COGS', value: -a.COGS},
+      {label:'Opex', value: -a.Opex},
+      {label:'Payroll', value: -a.Payroll}
+    ];
+    let cum = 0;
+    const bars = steps.map(s=>{ const start=cum; cum+=s.value; return { range:[Math.min(start,cum),Math.max(start,cum)], up:s.value>=0 }; });
+    bars.push({ range:[Math.min(0,cum),Math.max(0,cum)], up:cum>=0, isTotal:true });
+    if(waterfallChartInst) waterfallChartInst.destroy();
+    waterfallChartInst = new Chart(document.getElementById('waterfallChart'), {
+      type:'bar',
+      data:{ labels:['Revenue','COGS','Opex','Payroll','Net Income'], datasets:[{
+        data: bars.map(x=>x.range),
+        backgroundColor: bars.map(x=> x.isTotal? '#7C3AED' : (x.up? '#2F7D5C' : '#C23B3B')),
+        borderRadius:5
+      }]},
+      options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{}} }
+    });
+  }
+
+  function row(label, bVal, aVal, bold){
+    const diff = bVal - aVal;
+    const style = bold? 'font-weight:800; border-top:2px solid var(--line);' : '';
+    return `<tr style="${style}"><td>${label}</td><td class="num mono">${fmt(bVal)}</td><td class="num mono">${fmt(aVal)}</td>
+      <td class="num mono" style="color:${diff<0?'var(--bad)':'var(--good)'}">${fmt(diff)}</td></tr>`;
+  }
+  let html = `<tr><th>Line</th><th class="num">Budget</th><th class="num">Actual</th><th class="num">Variance</th></tr>`;
+  html += row('Revenue', b.Revenue, a.Revenue);
+  html += row('COGS', b.COGS, a.COGS);
+  html += row('Gross Profit', gpB, gpA, true);
+  html += row('Operating expenses', b.Opex, a.Opex);
+  html += row('Payroll', b.Payroll, a.Payroll);
+  html += row('Net Income', niB, niA, true);
+  document.getElementById('incomeTable').innerHTML = html;
 }
 
 // ---------- Aggregation helpers ----------
 function deptBudgetTotal(dept){ return STATE.budget.filter(r=>r.Dept===dept).reduce((s,r)=>s+Number(r.Amount||0),0); }
 function deptActualTotal(dept){ return STATE.actual.filter(r=>r.Dept===dept).reduce((s,r)=>s+Number(r.Amount||0),0); }
 function monthTotals(rows){ const arr=Array(12).fill(0); rows.forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) arr[m-1]+=Number(r.Amount||0); }); return arr; }
+
+function variancesByAccount(){
+  const key = r => r.Dept+'||'+r.GLAccount;
+  const b = {}, a = {};
+  STATE.budget.forEach(r=>{ const k=key(r); b[k]=(b[k]||0)+Number(r.Amount||0); });
+  STATE.actual.forEach(r=>{ const k=key(r); a[k]=(a[k]||0)+Number(r.Amount||0); });
+  const keys = new Set([...Object.keys(b), ...Object.keys(a)]);
+  const out = [];
+  keys.forEach(k=>{
+    const [dept, gl] = k.split('||');
+    const budget = b[k]||0, actual = a[k]||0;
+    out.push({ dept, gl, budget, actual, diff: budget - actual });
+  });
+  return out;
+}
+
+function renderTopVariances(){
+  const rows = variancesByAccount().filter(r=>r.budget!==0 || r.actual!==0);
+  const overspend = [...rows].sort((x,y)=>x.diff-y.diff).slice(0,5); // most negative diff = spent more than budget
+  const underspend = [...rows].filter(r=>r.diff>0).sort((x,y)=>y.diff-x.diff).slice(0,5); // biggest unused budget
+
+  function list(items, kind){
+    if(!items.length) return emptyState('Nothing to show yet');
+    return items.map(r=>{
+      const color = kind==='over' ? 'var(--bad)' : 'var(--good)';
+      return `<tr>
+        <td><b>${r.dept}</b><div style="font-size:11.5px; color:var(--muted);">${r.gl}</div></td>
+        <td class="num mono" style="color:${color};">${fmt(Math.abs(r.diff))}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  document.getElementById('topVariancesCard').innerHTML = `
+    <div class="card">
+      <div class="section-title" style="margin-top:0;">Biggest overspend</div>
+      <table>${list(overspend,'over')}</table>
+    </div>
+    <div class="card">
+      <div class="section-title" style="margin-top:0;">Biggest unused budget</div>
+      <table>${list(underspend,'under')}</table>
+    </div>
+  `;
+}
 
 // ---------- Dashboard ----------
 function renderAll(){
@@ -446,7 +563,10 @@ function renderAll(){
     </div>`;
   }).join('') || emptyState('No budget data for this year yet');
 
+  renderTopVariances();
+
   // trend chart
+  if(typeof Chart === 'undefined'){ console.warn('Chart.js failed to load — charts skipped'); return; }
   const bM = monthTotals(STATE.budget), aM = monthTotals(STATE.actual);
   if(trendChartInst) trendChartInst.destroy();
   trendChartInst = new Chart(document.getElementById('trendChart'), {
@@ -494,14 +614,14 @@ function renderBuilderTable(){
   const dept = document.getElementById('builderDept').value;
   const rows = STATE.budget.filter(r=>r.Dept===dept);
   const byGL = {};
-  rows.forEach(r=>{ byGL[r.GLAccount] = byGL[r.GLAccount]||{cat:r.Category,total:0}; byGL[r.GLAccount].total += Number(r.Amount||0); });
+  rows.forEach(r=>{ byGL[r.GLAccount] = byGL[r.GLAccount]||{cat:r.AccountType,total:0}; byGL[r.GLAccount].total += Number(r.Amount||0); });
   const keys = Object.keys(byGL);
-  let html = `<tr><th>Account</th><th>Category</th><th class="num">Annual total</th><th></th></tr>`;
+  let html = `<tr><th>Account</th><th>Type</th><th class="num">Annual total</th><th></th></tr>`;
   if(!keys.length){ html += `<tr><td colspan="4">${emptyState('No line items for this department yet — add one')}</td></tr>`; }
   keys.forEach(k=>{
     html += `<tr>
       <td>${k}</td>
-      <td><span class="pill flat">${byGL[k].cat==='Payroll'?'Payroll':'Opex'}</span></td>
+      <td><span class="pill flat">${byGL[k].cat||'Opex'}</span></td>
       <td class="num mono">${fmt(byGL[k].total)}</td>
       <td><button class="btn ghost" style="padding:5px 10px; font-size:12px;" onclick="deleteLine('${dept}','${k.replace(/'/g,"\\'")}')">Delete</button></td>
     </tr>`;
@@ -530,7 +650,7 @@ async function saveLine(){
   const rows = [];
   document.querySelectorAll('.lineMonthInput').forEach(inp=>{
     const amt = Number(inp.value)||0;
-    rows.push({year:STATE.year, dept, glAccount:gl, category:cat, month:Number(inp.dataset.m), amount:amt});
+    rows.push({year:STATE.year, dept, glAccount:gl, accountType:cat, month:Number(inp.dataset.m), amount:amt});
   });
   toast('Saving...');
   const res = await apiPost({action:'saveBudget', rows});
@@ -545,10 +665,22 @@ async function deleteLine(dept, glAccount){
 
 // ---------- Variance ----------
 function renderVarianceTable(){
+  const deptRows = DEPTS.map(d=>({d, b:deptBudgetTotal(d), a:deptActualTotal(d)})).filter(r=>r.b!==0 || r.a!==0);
+
+  if(typeof Chart !== 'undefined'){
+    if(varianceChartInst) varianceChartInst.destroy();
+    varianceChartInst = new Chart(document.getElementById('varianceChart'), {
+      type:'bar',
+      data:{ labels: deptRows.map(r=>r.d), datasets:[
+        {label:'Budget', data:deptRows.map(r=>r.b), backgroundColor:'#E3DCEF', borderRadius:5},
+        {label:'Actual', data:deptRows.map(r=>r.a), backgroundColor:'#7C3AED', borderRadius:5}
+      ]},
+      options:{ responsive:true, plugins:{legend:{position:'bottom', labels:{font:{family:'Manrope'}}}}, scales:{y:{beginAtZero:true}} }
+    });
+  }
+
   let html = `<tr><th>Department</th><th class="num">Budget</th><th class="num">Actual</th><th class="num">Variance</th><th class="num">%</th><th>Status</th></tr>`;
-  DEPTS.forEach(d=>{
-    const b=deptBudgetTotal(d), a=deptActualTotal(d);
-    if(b===0 && a===0) return;
+  deptRows.forEach(({d,b,a})=>{
     const diff = b-a; const pct = b? (a/b*100):0;
     const status = pct>105? {t:'Over budget',c:'bad'} : (pct<80? {t:'Under-spent',c:'warn'} : {t:'On track',c:'good'});
     html += `<tr><td><b>${d}</b></td><td class="num mono">${fmt(b)}</td><td class="num mono">${fmt(a)}</td>
@@ -562,8 +694,10 @@ function renderVarianceTable(){
 // ---------- Detail ----------
 function renderDetailTable(){
   const dept = document.getElementById('detailDept').value;
+  const search = (document.getElementById('detailSearch').value || '').toLowerCase();
   const b = STATE.budget.filter(r=>r.Dept===dept), a = STATE.actual.filter(r=>r.Dept===dept);
-  const glSet = new Set([...b.map(r=>r.GLAccount), ...a.map(r=>r.GLAccount)]);
+  let glSet = [...new Set([...b.map(r=>r.GLAccount), ...a.map(r=>r.GLAccount)])];
+  if(search) glSet = glSet.filter(gl=>gl.toLowerCase().includes(search));
   let html = `<tr><th>Account</th><th class="num">Annual budget</th><th class="num">Actual to date</th><th class="num">Variance</th></tr>`;
   glSet.forEach(gl=>{
     const bt = b.filter(r=>r.GLAccount===gl).reduce((s,r)=>s+Number(r.Amount||0),0);
@@ -573,10 +707,14 @@ function renderDetailTable(){
   });
   document.getElementById('detailTable').innerHTML = html || `<tr><td>${emptyState('No data')}</td></tr>`;
 }
+document.addEventListener('input', (e)=>{
+  if(e.target.id==='detailSearch') renderDetailTable();
+});
 document.addEventListener('change', (e)=>{
   if(e.target.id==='detailDept') renderDetailTable();
   if(e.target.id==='builderYear') loadYear(e.target.value).then(renderBuilderTable);
   if(e.target.id==='varianceYear') loadYear(e.target.value).then(renderVarianceTable);
+  if(e.target.id==='incomeYear') loadYear(e.target.value).then(renderIncomeStatement);
   if(e.target.id==='detailYear') loadYear(e.target.value).then(renderDetailTable);
 });
 </script>
