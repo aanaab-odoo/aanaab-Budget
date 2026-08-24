@@ -220,7 +220,10 @@
         <div class="page-title" id="deptViewTitle">Department</div>
         <div class="page-sub">Budget vs. actual — click a row to expand</div>
       </div>
-      <button class="btn ghost" onclick="signOutToGate()">🔓 Switch Department</button>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <select class="year-select" id="deptViewYear" onchange="onDeptViewYearChange()"></select>
+        <button class="btn ghost" onclick="signOutToGate()">🔓 Switch Department</button>
+      </div>
     </div>
 
     <div style="display:flex; gap:8px; margin-bottom:18px;">
@@ -498,7 +501,8 @@ async function boot(){
   try{
     const yearsRes = await apiGet('action=years');
     STATE.years = (yearsRes.years && yearsRes.years.length) ? yearsRes.years : [new Date().getFullYear()];
-    STATE.year = STATE.years[STATE.years.length-1];
+    const currentCalendarYear = new Date().getFullYear();
+    STATE.year = STATE.years.includes(currentCalendarYear) ? currentCalendarYear : STATE.years[STATE.years.length-1];
     ['yearSelect','builderYear','varianceYear','incomeYear','detailYear'].forEach(id=>{
       populateSelect(id, STATE.years, true);
       document.getElementById(id).value = STATE.year;
@@ -584,11 +588,21 @@ function unlockDept(dept){
     document.getElementById('sidebar').style.display='none';
     document.getElementById('app-pages').style.display='none';
     document.getElementById('page-dept-view').style.display='block';
+    populateSelect('deptViewYear', STATE.years, true);
+    document.getElementById('deptViewYear').value = STATE.year;
     deptExpand = { all:false, rows:{} };
     switchDeptTab('current');
     renderDeptView(dept);
     checkExistingNextYearBudget(dept);
   }
+}
+
+async function onDeptViewYearChange(){
+  const year = Number(document.getElementById('deptViewYear').value);
+  await loadYear(year);
+  deptExpand = { all:false, rows:{} };
+  renderDeptView(STATE.unlockedDept);
+  checkExistingNextYearBudget(STATE.unlockedDept);
 }
 
 function switchDeptTab(tab){
@@ -600,6 +614,7 @@ function switchDeptTab(tab){
 
 async function checkExistingNextYearBudget(dept){
   const nextYear = Math.max(...STATE.years) + 1;
+  document.getElementById('tabNextBtn').style.display='none';
   try{
     const data = await apiGet('year='+nextYear);
     const rows = (data.budget||[]).filter(r=>r.Dept===dept && r.GLAccount==='Department Total (Forecast)');
