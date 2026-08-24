@@ -242,7 +242,7 @@
       <div class="card">
         <p style="color:var(--muted); font-size:13px; margin:0 0 16px;">
           Set next year's total for this department — either a % increase on this year's budget, or a specific number.
-          The suggested monthly split follows this year's budget pattern (same shape, applied to the new total only — not per line item).
+          The total gets split across months only — not per line item.
         </p>
         <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:end;">
           <div style="min-width:180px;">
@@ -254,8 +254,16 @@
             <label>Set a specific total</label>
             <input id="nextYearFixed" type="number" placeholder="e.g. 500000">
           </div>
-          <button class="btn gold" onclick="generateNextYearSuggestion()">Generate suggestion</button>
         </div>
+        <div style="margin-top:16px;">
+          <label>Split months by</label>
+          <select id="nextYearShapeMethod" style="max-width:260px;">
+            <option value="equal">Equal across all 12 months</option>
+            <option value="budget" selected>This year's budget pattern</option>
+            <option value="actual">This year's actual pattern</option>
+          </select>
+        </div>
+        <button class="btn gold" style="margin-top:16px;" onclick="generateNextYearSuggestion()">Generate suggestion</button>
         <div id="nextYearSuggestionWrap" style="margin-top:20px; display:none;">
           <table id="nextYearTable"></table>
           <button class="btn gold" style="margin-top:14px;" onclick="saveNextYearBudget()">Save as next year's budget</button>
@@ -615,7 +623,7 @@ function switchDeptTab(tab){
 }
 
 async function checkExistingNextYearBudget(dept){
-  const nextYear = Math.max(...STATE.years) + 1;
+  const nextYear = STATE.year + 1;
   document.getElementById('tabNextBtn').style.display='none';
   try{
     const data = await apiGet('year='+nextYear);
@@ -727,10 +735,17 @@ function generateNextYearSuggestion(){
   else if(!isNaN(pct)){ nextTotal = currentBudgetTotal * (1 + pct/100); }
   else { toast('Enter a % increase or a specific total'); return; }
 
-  const monthTotals = Array(12).fill(0);
-  b.forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) monthTotals[m-1]+=Number(r.Amount||0); });
-  const budgetTotal = monthTotals.reduce((s,v)=>s+v,0);
-  const shape = budgetTotal>0 ? monthTotals.map(v=>v/budgetTotal) : Array(12).fill(1/12);
+  const method = document.getElementById('nextYearShapeMethod').value;
+  let shape;
+  if(method === 'equal'){
+    shape = Array(12).fill(1/12);
+  } else {
+    const sourceRows = method === 'actual' ? a : b;
+    const monthTotals = Array(12).fill(0);
+    sourceRows.forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) monthTotals[m-1]+=Number(r.Amount||0); });
+    const sourceTotal = monthTotals.reduce((s,v)=>s+v,0);
+    shape = sourceTotal>0 ? monthTotals.map(v=>v/sourceTotal) : Array(12).fill(1/12);
+  }
 
   const suggested = shape.map(p=>Math.round(nextTotal*p*100)/100);
   nextYearSuggestion = { dept, total: nextTotal, monthly: suggested };
@@ -752,7 +767,7 @@ function renderNextYearSuggestionTable(){
 
 async function saveNextYearBudget(){
   if(!nextYearSuggestion){ toast('Generate a suggestion first'); return; }
-  const nextYear = Math.max(...STATE.years) + 1;
+  const nextYear = STATE.year + 1;
   const rows = nextYearSuggestion.monthly.map((amt,i)=>({
     year: nextYear, dept: nextYearSuggestion.dept, glAccount: 'Department Total (Forecast)',
     accountType: 'Opex', month: i+1, amount: amt
