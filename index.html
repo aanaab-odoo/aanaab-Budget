@@ -184,6 +184,7 @@
   <div class="nav-item" data-page="setup"><span class="nav-icon">⚙</span> Settings</div>
   <div class="nav-item" onclick="signOutToGate()"><span class="nav-icon">🔓</span> Switch Department</div>
   <div class="sidebar-foot">
+    <button class="btn ghost" id="refreshOdooBtnSidebar" style="width:100%; margin-bottom:10px;" onclick="refreshActualsFromOdoo(this)">🔄 Refresh Actuals from Odoo</button>
     <span class="dot" id="connDot" style="background:#C23B3B;"></span><b id="connText">Not connected</b><br>
     Last sync: <span id="lastSync">—</span>
   </div>
@@ -222,6 +223,7 @@
       </div>
       <div style="display:flex; gap:10px; align-items:center;">
         <select class="year-select" id="deptViewYear" onchange="onDeptViewYearChange()"></select>
+        <button class="btn ghost" id="refreshOdooBtnDept" onclick="refreshActualsFromOdoo(this)">🔄 Refresh Actuals</button>
         <button class="btn ghost" onclick="signOutToGate()">🔓 Switch Department</button>
       </div>
     </div>
@@ -240,7 +242,7 @@
       <div class="card">
         <p style="color:var(--muted); font-size:13px; margin:0 0 16px;">
           Set next year's total for this department — either a % increase on this year's budget, or a specific number.
-          The suggested monthly split follows this year's actual spending pattern (same shape, applied to the new total only — not per line item).
+          The suggested monthly split follows this year's budget pattern (same shape, applied to the new total only — not per line item).
         </p>
         <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:end;">
           <div style="min-width:180px;">
@@ -630,6 +632,34 @@ function signOutToGate(){
   showDeptGate();
 }
 
+// Triggers a live sync of the current month's actuals from Odoo (via the Web App),
+// then reloads whichever year is currently on screen and re-renders. Can take a
+// while (Odoo API calls happen server-side) — button shows a spinner meanwhile.
+async function refreshActualsFromOdoo(btn){
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ Syncing…';
+  try{
+    const res = await apiPost({action:'syncActualsNow'});
+    if(res.ok){
+      toast('Actuals refreshed for ' + getMonthName_(res.result.month) + ' ' + res.result.year);
+      await loadYear(STATE.year);
+      if(STATE.unlockedDept && !/finance/i.test(STATE.unlockedDept)){
+        deptExpand = { all:false, rows:{} };
+        renderDeptView(STATE.unlockedDept);
+      }
+    } else {
+      toast('Sync failed: ' + res.error);
+    }
+  }catch(e){
+    toast('Sync failed — check your connection');
+    console.error(e);
+  }
+  btn.disabled = false;
+  btn.textContent = originalText;
+}
+function getMonthName_(m){ return MONTHS[m-1] || m; }
+
 let deptExpand = { all:false, rows:{} };
 
 function toggleAllAccounts(){ deptExpand.all = !deptExpand.all; renderDeptView(STATE.unlockedDept); }
@@ -698,9 +728,9 @@ function generateNextYearSuggestion(){
   else { toast('Enter a % increase or a specific total'); return; }
 
   const monthTotals = Array(12).fill(0);
-  a.forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) monthTotals[m-1]+=Number(r.Amount||0); });
-  const actualTotal = monthTotals.reduce((s,v)=>s+v,0);
-  const shape = actualTotal>0 ? monthTotals.map(v=>v/actualTotal) : Array(12).fill(1/12);
+  b.forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) monthTotals[m-1]+=Number(r.Amount||0); });
+  const budgetTotal = monthTotals.reduce((s,v)=>s+v,0);
+  const shape = budgetTotal>0 ? monthTotals.map(v=>v/budgetTotal) : Array(12).fill(1/12);
 
   const suggested = shape.map(p=>Math.round(nextTotal*p*100)/100);
   nextYearSuggestion = { dept, total: nextTotal, monthly: suggested };
