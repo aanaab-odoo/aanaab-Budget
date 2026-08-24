@@ -218,36 +218,51 @@
     <div class="page-head">
       <div>
         <div class="page-title" id="deptViewTitle">Department</div>
-        <div class="page-sub">Budget vs. actual for this year — click a row to expand</div>
+        <div class="page-sub">Budget vs. actual — click a row to expand</div>
       </div>
       <button class="btn ghost" onclick="signOutToGate()">🔓 Switch Department</button>
     </div>
 
-    <div class="card">
-      <table id="deptCompareTable"></table>
+    <div style="display:flex; gap:8px; margin-bottom:18px;">
+      <button class="btn gold" id="tabCurrentBtn" onclick="switchDeptTab('current')">This Year</button>
+      <button class="btn ghost" id="tabNextBtn" onclick="switchDeptTab('next')" style="display:none;">Next Year Budget</button>
     </div>
 
-    <div class="section-title">Create Budget for Next Year</div>
-    <div class="card">
-      <p style="color:var(--muted); font-size:13px; margin:0 0 16px;">
-        Set next year's total for this department — either a % increase on this year's budget, or a specific number.
-        The suggested monthly split follows this year's actual spending pattern (same shape, applied to the new total only — not per line item).
-      </p>
-      <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:end;">
-        <div style="min-width:180px;">
-          <label>Increase this year's budget by %</label>
-          <input id="nextYearPct" type="number" placeholder="e.g. 10">
-        </div>
-        <div style="color:var(--muted); padding-bottom:10px;">— or —</div>
-        <div style="min-width:180px;">
-          <label>Set a specific total</label>
-          <input id="nextYearFixed" type="number" placeholder="e.g. 500000">
-        </div>
-        <button class="btn gold" onclick="generateNextYearSuggestion()">Generate suggestion</button>
+    <div id="deptTabCurrent">
+      <div class="card">
+        <table id="deptCompareTable"></table>
       </div>
-      <div id="nextYearSuggestionWrap" style="margin-top:20px; display:none;">
-        <table id="nextYearTable"></table>
-        <button class="btn gold" style="margin-top:14px;" onclick="saveNextYearBudget()">Save as next year's budget</button>
+
+      <div class="section-title">Create Budget for Next Year</div>
+      <div class="card">
+        <p style="color:var(--muted); font-size:13px; margin:0 0 16px;">
+          Set next year's total for this department — either a % increase on this year's budget, or a specific number.
+          The suggested monthly split follows this year's actual spending pattern (same shape, applied to the new total only — not per line item).
+        </p>
+        <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:end;">
+          <div style="min-width:180px;">
+            <label>Increase this year's budget by %</label>
+            <input id="nextYearPct" type="number" placeholder="e.g. 10">
+          </div>
+          <div style="color:var(--muted); padding-bottom:10px;">— or —</div>
+          <div style="min-width:180px;">
+            <label>Set a specific total</label>
+            <input id="nextYearFixed" type="number" placeholder="e.g. 500000">
+          </div>
+          <button class="btn gold" onclick="generateNextYearSuggestion()">Generate suggestion</button>
+        </div>
+        <div id="nextYearSuggestionWrap" style="margin-top:20px; display:none;">
+          <table id="nextYearTable"></table>
+          <button class="btn gold" style="margin-top:14px;" onclick="saveNextYearBudget()">Save as next year's budget</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="deptTabNext" style="display:none;">
+      <div class="card">
+        <p style="color:var(--muted); font-size:13px; margin:0 0 16px;">Edit any month directly, then save.</p>
+        <table id="nextYearEditTable"></table>
+        <button class="btn gold" style="margin-top:14px;" onclick="updateNextYearBudget()">Save changes</button>
       </div>
     </div>
   </div>
@@ -570,9 +585,31 @@ function unlockDept(dept){
     document.getElementById('app-pages').style.display='none';
     document.getElementById('page-dept-view').style.display='block';
     deptExpand = { all:false, rows:{} };
+    switchDeptTab('current');
     renderDeptView(dept);
+    checkExistingNextYearBudget(dept);
   }
 }
+
+function switchDeptTab(tab){
+  document.getElementById('deptTabCurrent').style.display = tab==='current' ? 'block' : 'none';
+  document.getElementById('deptTabNext').style.display = tab==='next' ? 'block' : 'none';
+  document.getElementById('tabCurrentBtn').className = 'btn ' + (tab==='current' ? 'gold' : 'ghost');
+  document.getElementById('tabNextBtn').className = 'btn ' + (tab==='next' ? 'gold' : 'ghost');
+}
+
+async function checkExistingNextYearBudget(dept){
+  const nextYear = Math.max(...STATE.years) + 1;
+  try{
+    const data = await apiGet('year='+nextYear);
+    const rows = (data.budget||[]).filter(r=>r.Dept===dept && r.GLAccount==='Department Total (Forecast)');
+    if(rows.length){
+      document.getElementById('tabNextBtn').style.display='inline-block';
+      renderNextYearEditTable(dept, nextYear, rows);
+    }
+  }catch(e){ /* silent — next-year tab just won't show if this fails */ }
+}
+
 function signOutToGate(){
   STATE.unlockedDept = null;
   showDeptGate();
@@ -629,6 +666,9 @@ function renderDeptView(dept){
 
 // ---------- Next-year budget suggestion ----------
 let nextYearSuggestion = null;
+let nextYearMonthsOpen = false;
+function toggleNextYearMonths(){ nextYearMonthsOpen = !nextYearMonthsOpen; renderNextYearSuggestionTable(); }
+
 function generateNextYearSuggestion(){
   const dept = STATE.unlockedDept;
   const b = STATE.budget.filter(r=>r.Dept===dept);
@@ -649,12 +689,20 @@ function generateNextYearSuggestion(){
 
   const suggested = shape.map(p=>Math.round(nextTotal*p*100)/100);
   nextYearSuggestion = { dept, total: nextTotal, monthly: suggested };
-
-  let html = `<tr><th>Month</th><th class="num">Suggested Budget</th></tr>`;
-  MONTHS.forEach((m,i)=> html += `<tr><td>${m}</td><td class="num mono">${fmt(suggested[i])}</td></tr>`);
-  html += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>Total</td><td class="num mono">${fmt(nextTotal)}</td></tr>`;
-  document.getElementById('nextYearTable').innerHTML = html;
+  nextYearMonthsOpen = false;
+  renderNextYearSuggestionTable();
   document.getElementById('nextYearSuggestionWrap').style.display='block';
+}
+
+function renderNextYearSuggestionTable(){
+  if(!nextYearSuggestion) return;
+  let html = `<tr><th>Line</th><th class="num">Amount</th></tr>`;
+  html += `<tr style="font-weight:800; cursor:pointer;" onclick="toggleNextYearMonths()">
+    <td>${nextYearMonthsOpen?'▾':'▸'} Total suggested budget</td><td class="num mono">${fmt(nextYearSuggestion.total)}</td></tr>`;
+  if(nextYearMonthsOpen){
+    MONTHS.forEach((m,i)=> html += `<tr style="background:var(--paper);"><td style="padding-left:24px; font-size:12.5px; color:var(--muted);">${m}</td><td class="num mono" style="font-size:12.5px;">${fmt(nextYearSuggestion.monthly[i])}</td></tr>`);
+  }
+  document.getElementById('nextYearTable').innerHTML = html;
 }
 
 async function saveNextYearBudget(){
@@ -666,7 +714,38 @@ async function saveNextYearBudget(){
   }));
   toast('Saving...');
   const res = await apiPost({action:'saveBudget', rows});
-  if(res.ok) toast(`Saved ${nextYear} budget for ${nextYearSuggestion.dept}`);
+  if(res.ok){
+    toast(`Saved ${nextYear} budget for ${nextYearSuggestion.dept}`);
+    document.getElementById('tabNextBtn').style.display='inline-block';
+    const apiRows = nextYearSuggestion.monthly.map((amt,i)=>({Month:i+1, Amount:amt, Dept:nextYearSuggestion.dept, GLAccount:'Department Total (Forecast)'}));
+    renderNextYearEditTable(nextYearSuggestion.dept, nextYear, apiRows);
+    switchDeptTab('next');
+  }
+  else toast('Error: '+res.error);
+}
+
+function renderNextYearEditTable(dept, year, rows){
+  const monthly = Array(12).fill(0);
+  rows.forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) monthly[m-1] = Number(r.Amount||0); });
+  let html = `<tr><th>Month</th><th class="num">Budget ${year}</th></tr>`;
+  MONTHS.forEach((m,i)=>{
+    html += `<tr><td>${m}</td><td class="num"><input type="number" class="mono nextYearEditInput" data-m="${i+1}" value="${monthly[i]}" style="text-align:left;"></td></tr>`;
+  });
+  document.getElementById('nextYearEditTable').innerHTML = html;
+  document.getElementById('nextYearEditTable').dataset.dept = dept;
+  document.getElementById('nextYearEditTable').dataset.year = year;
+}
+
+async function updateNextYearBudget(){
+  const tableEl = document.getElementById('nextYearEditTable');
+  const dept = tableEl.dataset.dept, year = Number(tableEl.dataset.year);
+  const rows = [];
+  document.querySelectorAll('.nextYearEditInput').forEach(inp=>{
+    rows.push({ year, dept, glAccount:'Department Total (Forecast)', accountType:'Opex', month:Number(inp.dataset.m), amount:Number(inp.value)||0 });
+  });
+  toast('Saving...');
+  const res = await apiPost({action:'saveBudget', rows});
+  if(res.ok) toast(`Updated ${year} budget for ${dept}`);
   else toast('Error: '+res.error);
 }
 
