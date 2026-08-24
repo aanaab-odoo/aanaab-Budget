@@ -218,25 +218,37 @@
     <div class="page-head">
       <div>
         <div class="page-title" id="deptViewTitle">Department</div>
-        <div class="page-sub">Budget vs. actual for this year, by account</div>
+        <div class="page-sub">Budget vs. actual for this year — click a row to expand</div>
       </div>
       <button class="btn ghost" onclick="signOutToGate()">🔓 Switch Department</button>
     </div>
 
-    <div class="grid grid-2">
-      <div class="card">
-        <div class="section-title" style="margin-top:0;">Budget</div>
-        <table id="deptBudgetTable"></table>
-      </div>
-      <div class="card">
-        <div class="section-title" style="margin-top:0;">Actual</div>
-        <table id="deptActualTable"></table>
-      </div>
-    </div>
-
-    <div class="section-title">Comparison</div>
     <div class="card">
       <table id="deptCompareTable"></table>
+    </div>
+
+    <div class="section-title">Create Budget for Next Year</div>
+    <div class="card">
+      <p style="color:var(--muted); font-size:13px; margin:0 0 16px;">
+        Set next year's total for this department — either a % increase on this year's budget, or a specific number.
+        The suggested monthly split follows this year's actual spending pattern (same shape, applied to the new total only — not per line item).
+      </p>
+      <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:end;">
+        <div style="min-width:180px;">
+          <label>Increase this year's budget by %</label>
+          <input id="nextYearPct" type="number" placeholder="e.g. 10">
+        </div>
+        <div style="color:var(--muted); padding-bottom:10px;">— or —</div>
+        <div style="min-width:180px;">
+          <label>Set a specific total</label>
+          <input id="nextYearFixed" type="number" placeholder="e.g. 500000">
+        </div>
+        <button class="btn gold" onclick="generateNextYearSuggestion()">Generate suggestion</button>
+      </div>
+      <div id="nextYearSuggestionWrap" style="margin-top:20px; display:none;">
+        <table id="nextYearTable"></table>
+        <button class="btn gold" style="margin-top:14px;" onclick="saveNextYearBudget()">Save as next year's budget</button>
+      </div>
     </div>
   </div>
 
@@ -487,12 +499,27 @@ async function boot(){
 }
 
 // ---------- Department gate ----------
+let deptPasswordMap = {};
+function buildDeptPasswords(depts){
+  deptPasswordMap = {};
+  const used = new Set();
+  depts.forEach(d=>{
+    const letters = d.replace(/[^A-Za-z]/g,'').toLowerCase();
+    let len = 3;
+    let pw = letters.slice(0, len);
+    while(used.has(pw) && len < letters.length){ len++; pw = letters.slice(0, len); }
+    used.add(pw);
+    deptPasswordMap[d] = pw;
+  });
+}
+
 function showDeptGate(){
   document.getElementById('sidebar').style.display='none';
   document.getElementById('app-pages').style.display='none';
   document.getElementById('page-dept-view').style.display='none';
   document.getElementById('page-dept-gate').style.display='block';
   const depts = getDisplayDepts();
+  buildDeptPasswords(depts);
   document.getElementById('deptGrid').innerHTML = depts.map(d=>{
     const isFinance = /finance/i.test(d);
     const initials = (d.replace(/[^A-Za-z]/g,'').slice(0,2) || '??').toUpperCase();
@@ -517,7 +544,7 @@ function closePwModal(){
   pendingDept = null;
 }
 function deptPassword(dept){
-  return dept.replace(/[^A-Za-z]/g,'').slice(0,3).toLowerCase();
+  return deptPasswordMap[dept] || dept.replace(/[^A-Za-z]/g,'').slice(0,3).toLowerCase();
 }
 function checkDeptPassword(){
   if(!pendingDept) return;
@@ -542,6 +569,7 @@ function unlockDept(dept){
     document.getElementById('sidebar').style.display='none';
     document.getElementById('app-pages').style.display='none';
     document.getElementById('page-dept-view').style.display='block';
+    deptExpand = { all:false, rows:{} };
     renderDeptView(dept);
   }
 }
@@ -550,36 +578,96 @@ function signOutToGate(){
   showDeptGate();
 }
 
+let deptExpand = { all:false, rows:{} };
+
+function toggleAllAccounts(){ deptExpand.all = !deptExpand.all; renderDeptView(STATE.unlockedDept); }
+function toggleAccountMonths(gl){ deptExpand.rows[gl] = !deptExpand.rows[gl]; renderDeptView(STATE.unlockedDept); }
+
 function renderDeptView(dept){
   document.getElementById('deptViewTitle').textContent = dept;
   const b = STATE.budget.filter(r=>r.Dept===dept);
   const a = STATE.actual.filter(r=>r.Dept===dept);
   const glSet = [...new Set([...b.map(r=>r.GLAccount), ...a.map(r=>r.GLAccount)])].sort();
 
-  const totalOf = (rows, gl) => rows.filter(r=>r.GLAccount===gl).reduce((s,r)=>s+Number(r.Amount||0),0);
-  let totalB = 0, totalA = 0;
+  const monthlyOf = (rows, gl) => { const arr=Array(12).fill(0); rows.filter(r=>r.GLAccount===gl).forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) arr[m-1]+=Number(r.Amount||0); }); return arr; };
+  const sum = arr => arr.reduce((s,v)=>s+v,0);
 
-  let budgetHtml = `<tr><th>Account</th><th class="num">Annual</th></tr>`;
-  let actualHtml = `<tr><th>Account</th><th class="num">Annual</th></tr>`;
-  let compareHtml = `<tr><th>Account</th><th class="num">Budget</th><th class="num">Actual</th><th class="num">Variance</th></tr>`;
+  let totalB=0, totalA=0;
+  let rowsHtml = '';
 
   glSet.forEach(gl=>{
-    const bt = totalOf(b, gl), at = totalOf(a, gl);
+    const bMonths = monthlyOf(b, gl), aMonths = monthlyOf(a, gl);
+    const bt = sum(bMonths), at = sum(aMonths);
     totalB += bt; totalA += at;
-    budgetHtml += `<tr><td>${gl}</td><td class="num mono">${fmt(bt)}</td></tr>`;
-    actualHtml += `<tr><td>${gl}</td><td class="num mono">${fmt(at)}</td></tr>`;
-    compareHtml += `<tr><td>${gl}</td><td class="num mono">${fmt(bt)}</td><td class="num mono">${fmt(at)}</td>
+    const isOpen = !!deptExpand.rows[gl];
+    const glEsc = gl.replace(/'/g,"\\'");
+    rowsHtml += `<tr style="cursor:pointer;" onclick="toggleAccountMonths('${glEsc}')">
+      <td style="padding-left:20px;">${isOpen?'▾':'▸'} ${gl}</td><td class="num mono">${fmt(bt)}</td><td class="num mono">${fmt(at)}</td>
       <td class="num mono" style="color:${bt-at<0?'var(--bad)':'var(--good)'}">${fmt(bt-at)}</td></tr>`;
+    if(isOpen){
+      MONTHS.forEach((m,mi)=>{
+        rowsHtml += `<tr style="background:var(--paper);">
+          <td style="padding-left:44px; font-size:12.5px; color:var(--muted);">${m}</td>
+          <td class="num mono" style="font-size:12.5px;">${fmt(bMonths[mi])}</td>
+          <td class="num mono" style="font-size:12.5px;">${fmt(aMonths[mi])}</td>
+          <td class="num mono" style="font-size:12.5px; color:${bMonths[mi]-aMonths[mi]<0?'var(--bad)':'var(--good)'}">${fmt(bMonths[mi]-aMonths[mi])}</td></tr>`;
+      });
+    }
   });
 
-  budgetHtml += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>Total</td><td class="num mono">${fmt(totalB)}</td></tr>`;
-  actualHtml += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>Total</td><td class="num mono">${fmt(totalA)}</td></tr>`;
-  compareHtml += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>Total</td><td class="num mono">${fmt(totalB)}</td><td class="num mono">${fmt(totalA)}</td>
+  let html = `<tr><th>Account</th><th class="num">Budget</th><th class="num">Actual</th><th class="num">Variance</th></tr>`;
+  html += `<tr style="font-weight:800; cursor:pointer;" onclick="toggleAllAccounts()">
+    <td>${deptExpand.all?'▾':'▸'} All accounts (${glSet.length})</td><td class="num mono">${fmt(totalB)}</td><td class="num mono">${fmt(totalA)}</td>
     <td class="num mono" style="color:${totalB-totalA<0?'var(--bad)':'var(--good)'}">${fmt(totalB-totalA)}</td></tr>`;
+  if(deptExpand.all) html += rowsHtml;
 
-  document.getElementById('deptBudgetTable').innerHTML = budgetHtml || `<tr><td>${emptyState('No data')}</td></tr>`;
-  document.getElementById('deptActualTable').innerHTML = actualHtml || `<tr><td>${emptyState('No data')}</td></tr>`;
-  document.getElementById('deptCompareTable').innerHTML = compareHtml || `<tr><td>${emptyState('No data')}</td></tr>`;
+  document.getElementById('deptCompareTable').innerHTML = html || `<tr><td>${emptyState('No data')}</td></tr>`;
+  document.getElementById('nextYearSuggestionWrap').style.display='none';
+  document.getElementById('nextYearPct').value='';
+  document.getElementById('nextYearFixed').value='';
+}
+
+// ---------- Next-year budget suggestion ----------
+let nextYearSuggestion = null;
+function generateNextYearSuggestion(){
+  const dept = STATE.unlockedDept;
+  const b = STATE.budget.filter(r=>r.Dept===dept);
+  const a = STATE.actual.filter(r=>r.Dept===dept);
+  const currentBudgetTotal = b.reduce((s,r)=>s+Number(r.Amount||0),0);
+
+  const pct = parseFloat(document.getElementById('nextYearPct').value);
+  const fixed = parseFloat(document.getElementById('nextYearFixed').value);
+  let nextTotal;
+  if(!isNaN(fixed) && fixed>0){ nextTotal = fixed; }
+  else if(!isNaN(pct)){ nextTotal = currentBudgetTotal * (1 + pct/100); }
+  else { toast('Enter a % increase or a specific total'); return; }
+
+  const monthTotals = Array(12).fill(0);
+  a.forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) monthTotals[m-1]+=Number(r.Amount||0); });
+  const actualTotal = monthTotals.reduce((s,v)=>s+v,0);
+  const shape = actualTotal>0 ? monthTotals.map(v=>v/actualTotal) : Array(12).fill(1/12);
+
+  const suggested = shape.map(p=>Math.round(nextTotal*p*100)/100);
+  nextYearSuggestion = { dept, total: nextTotal, monthly: suggested };
+
+  let html = `<tr><th>Month</th><th class="num">Suggested Budget</th></tr>`;
+  MONTHS.forEach((m,i)=> html += `<tr><td>${m}</td><td class="num mono">${fmt(suggested[i])}</td></tr>`);
+  html += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>Total</td><td class="num mono">${fmt(nextTotal)}</td></tr>`;
+  document.getElementById('nextYearTable').innerHTML = html;
+  document.getElementById('nextYearSuggestionWrap').style.display='block';
+}
+
+async function saveNextYearBudget(){
+  if(!nextYearSuggestion){ toast('Generate a suggestion first'); return; }
+  const nextYear = Math.max(...STATE.years) + 1;
+  const rows = nextYearSuggestion.monthly.map((amt,i)=>({
+    year: nextYear, dept: nextYearSuggestion.dept, glAccount: 'Department Total (Forecast)',
+    accountType: 'Opex', month: i+1, amount: amt
+  }));
+  toast('Saving...');
+  const res = await apiPost({action:'saveBudget', rows});
+  if(res.ok) toast(`Saved ${nextYear} budget for ${nextYearSuggestion.dept}`);
+  else toast('Error: '+res.error);
 }
 
 function setConn(ok){
