@@ -331,20 +331,81 @@
     <div id="page-builder" style="display:none;">
       <div class="page-head">
         <div>
-          <div class="page-title">Build / edit budget</div>
-          <div class="page-sub">Add line items per department and set the monthly split</div>
+          <div class="page-title">Budget Builder</div>
+          <div class="page-sub">Same view every department gets — pick a department to work in it</div>
         </div>
         <div style="display:flex; gap:10px;">
-          <select class="year-select" id="builderYear"></select>
+          <select id="builderDept" style="max-width:220px;" onchange="onBuilderDeptChange()"></select>
+          <select class="year-select" id="builderYear" onchange="onBuilderYearChange()"></select>
           <button class="btn ghost" onclick="addNewYear()">+ New year</button>
-        </div>
-      </div>
-      <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-          <select id="builderDept" style="max-width:220px;" onchange="renderBuilderTable()"></select>
           <button class="btn gold" onclick="openLineModal()">+ Add line item</button>
         </div>
-        <table id="builderTable"></table>
+      </div>
+
+      <div style="display:flex; gap:8px; margin-bottom:18px;">
+        <button class="btn gold" id="bTabCurrentBtn" onclick="switchBuilderTab('current')">This Year</button>
+        <button class="btn ghost" id="bTabNextBtn" onclick="switchBuilderTab('next')" style="display:none;">Next Year Budget</button>
+      </div>
+
+      <div id="builderTabCurrent">
+        <div class="card">
+          <table id="builderCompareTable"></table>
+        </div>
+
+        <div class="section-title">Budget Detail — every account, every month</div>
+        <div class="card">
+          <div style="overflow-x:auto; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:4px;"><table id="builderDetailTable" style="font-size:12.5px; min-width:1500px;"></table></div>
+        </div>
+
+        <div class="section-title">Create Budget for Next Year</div>
+        <div class="card">
+          <p style="color:var(--muted); font-size:13px; margin:0 0 16px;">
+            Set next year's total for this department — either a % increase on this year's budget, or a specific number.
+            The total gets split across months only — not per line item.
+          </p>
+          <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:end;">
+            <div style="min-width:180px;">
+              <label>Increase this year's budget by %</label>
+              <input id="bNextYearPct" type="number" placeholder="e.g. 10">
+            </div>
+            <div style="color:var(--muted); padding-bottom:10px;">— or —</div>
+            <div style="min-width:180px;">
+              <label>Set a specific total</label>
+              <input id="bNextYearFixed" type="number" placeholder="e.g. 500000">
+            </div>
+          </div>
+          <div style="margin-top:16px;">
+            <label>Split months by</label>
+            <select id="bNextYearShapeMethod" style="max-width:260px;">
+              <option value="equal">Equal across all 12 months</option>
+              <option value="budget" selected>This year's budget pattern</option>
+              <option value="actual">This year's actual pattern</option>
+            </select>
+          </div>
+          <button class="btn gold" style="margin-top:16px;" onclick="generateBuilderNextYearSuggestion()">Generate suggestion</button>
+          <div id="bNextYearSuggestionWrap" style="margin-top:20px; display:none;">
+            <table id="bNextYearTable"></table>
+            <button class="btn gold" style="margin-top:14px;" onclick="generateBuilderItemLevelBreakdown()">Break down by account →</button>
+          </div>
+          <div id="bItemLevelWrap" style="margin-top:24px; display:none;">
+            <div class="section-title" style="margin-top:0;">Item-level breakdown — edit any cell, then submit</div>
+            <p style="color:var(--muted); font-size:13px; margin:0 0 16px;">
+              Each account gets the same share of the new total it had of this year's budget, split across months
+              using that same account's own monthly pattern from this year. Edit anything you'd like to change.
+            </p>
+            <div style="overflow-x:auto; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:4px;"><table id="bItemLevelTable" style="font-size:12.5px; min-width:1500px;"></table></div>
+            <button class="btn gold" style="margin-top:14px;" onclick="submitBuilderItemLevelBudget()">Save & Submit for Finance Approval</button>
+            <div id="bSubmitStatusMsg" style="margin-top:10px; font-size:13px; display:none;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="builderTabNext" style="display:none;">
+        <div class="card">
+          <p style="color:var(--muted); font-size:13px; margin:0 0 16px;">Edit any month directly, then save.</p>
+          <div style="overflow-x:auto;"><table id="bNextYearEditTable" style="min-width:1200px;"></table></div>
+          <button class="btn gold" style="margin-top:14px;" onclick="updateBuilderNextYearBudget()">Save changes</button>
+        </div>
       </div>
     </div>
 
@@ -368,12 +429,11 @@
       <div class="page-head">
         <div>
           <div class="page-title">Income Statement</div>
-          <div class="page-sub">Budget vs. actual, rolled up by Revenue / COGS / Opex / Payroll across all departments</div>
+          <div class="page-sub">Exactly what's in the Income_Statement sheet for this year — Actual, Actual last year, Budget, and Forecast</div>
         </div>
         <select class="year-select" id="incomeYear"></select>
       </div>
       <div class="card">
-        <canvas id="waterfallChart" height="260" style="margin-bottom:20px;"></canvas>
         <table id="incomeTable"></table>
       </div>
     </div>
@@ -1038,7 +1098,7 @@ function navTo(page){
   ['dashboard','builder','variance','income','detail','approvals','setup'].forEach(p=>{
     document.getElementById('page-'+p).style.display = (p===page)?'block':'none';
   });
-  if(page==='builder') renderBuilderTable();
+  if(page==='builder'){ builderExpand = { all:false, rows:{} }; switchBuilderTab('current'); renderBuilderDeptView(); checkBuilderExistingNextYearBudget(); }
   if(page==='variance') renderVarianceTable();
   if(page==='income') renderIncomeStatement();
   if(page==='detail') renderDetailTable();
@@ -1047,55 +1107,27 @@ function navTo(page){
 
 // ---------- Income Statement ----------
 function typeTotals(rows, type){ return rows.filter(r=>(r.AccountType||'Opex')===type).reduce((s,r)=>s+Number(r.Amount||0),0); }
-function renderIncomeStatement(){
-  const types = ['Revenue','COGS','Opex','Payroll','OtherIncome','OtherExpense'];
-  const b = {}, a = {};
-  types.forEach(t=>{ b[t]=typeTotals(STATE.budget,t); a[t]=typeTotals(STATE.actual,t); });
-  const gpB = b.Revenue - b.COGS, gpA = a.Revenue - a.COGS;
-  const oiB = gpB - b.Opex - b.Payroll, oiA = gpA - a.Opex - a.Payroll;
-  const niB = oiB + b.OtherIncome - b.OtherExpense, niA = oiA + a.OtherIncome - a.OtherExpense;
-
-  if(typeof Chart !== 'undefined'){
-    const steps = [
-      {label:'Revenue', value: a.Revenue},
-      {label:'COGS', value: -a.COGS},
-      {label:'Opex', value: -a.Opex},
-      {label:'Payroll', value: -a.Payroll},
-      {label:'Other Income', value: a.OtherIncome},
-      {label:'Other Expense', value: -a.OtherExpense}
-    ];
-    let cum = 0;
-    const bars = steps.map(s=>{ const start=cum; cum+=s.value; return { range:[Math.min(start,cum),Math.max(start,cum)], up:s.value>=0 }; });
-    bars.push({ range:[Math.min(0,cum),Math.max(0,cum)], up:cum>=0, isTotal:true });
-    if(waterfallChartInst) waterfallChartInst.destroy();
-    waterfallChartInst = new Chart(document.getElementById('waterfallChart'), {
-      type:'bar',
-      data:{ labels:['Revenue','COGS','Opex','Payroll','Other Income','Other Expense','Net Income'], datasets:[{
-        data: bars.map(x=>x.range),
-        backgroundColor: bars.map(x=> x.isTotal? '#6F52FF' : (x.up? '#2EBD90' : '#C23B3B')),
-        borderRadius:5
-      }]},
-      options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{}} }
-    });
+async function renderIncomeStatement(){
+  const wrap = document.getElementById('incomeTable');
+  wrap.innerHTML = `<tr><td>${emptyState('Loading…')}</td></tr>`;
+  let data;
+  try{
+    data = await apiGet('action=incomeStatement&year='+STATE.year);
+  }catch(e){
+    wrap.innerHTML = `<tr><td>${emptyState('Could not load Income_Statement_'+STATE.year)}</td></tr>`;
+    return;
   }
-
-  function row(label, bVal, aVal, bold){
-    const diff = bVal - aVal;
-    const style = bold? 'font-weight:800; border-top:2px solid var(--line);' : '';
-    return `<tr style="${style}"><td>${label}</td><td class="num mono">${fmt(bVal)}</td><td class="num mono">${fmt(aVal)}</td>
-      <td class="num mono" style="color:${diff<0?'var(--bad)':'var(--good)'}">${fmt(diff)}</td></tr>`;
+  if(!data.rows || !data.rows.length){
+    wrap.innerHTML = `<tr><td>${emptyState('Run "Build Income Statement sheet" in the Google Sheet for '+STATE.year+' first')}</td></tr>`;
+    return;
   }
-  let html = `<tr><th>Line</th><th class="num">Budget</th><th class="num">Actual</th><th class="num">Variance</th></tr>`;
-  html += row('Revenue', b.Revenue, a.Revenue);
-  html += row('COGS', b.COGS, a.COGS);
-  html += row('Gross Profit', gpB, gpA, true);
-  html += row('Operating expenses', b.Opex, a.Opex);
-  html += row('Payroll', b.Payroll, a.Payroll);
-  html += row('Operating Income', oiB, oiA, true);
-  html += row('Other Income', b.OtherIncome, a.OtherIncome);
-  html += row('Other Expense', b.OtherExpense, a.OtherExpense);
-  html += row('Net Income', niB, niA, true);
-  document.getElementById('incomeTable').innerHTML = html;
+  const header = data.header && data.header.length ? data.header : ['Line', 'Actual '+(STATE.year-1), 'Actual '+STATE.year, 'Budget '+STATE.year, 'Forecast '+STATE.year];
+  let html = `<tr>${header.map((h,i)=>`<th${i>0?' class="num"':''}>${h}</th>`).join('')}</tr>`;
+  data.rows.forEach(r=>{
+    const style = r.bold ? 'font-weight:800; border-top:2px solid var(--line);' : '';
+    html += `<tr style="${style}"><td>${r.label}</td><td class="num mono">${fmt(r.actualPrior)}</td><td class="num mono">${fmt(r.actualYear)}</td><td class="num mono">${fmt(r.budgetYear)}</td><td class="num mono">${fmt(r.forecastYear)}</td></tr>`;
+  });
+  wrap.innerHTML = html;
 }
 
 // ---------- Aggregation helpers ----------
@@ -1221,26 +1253,253 @@ function addNewYear(){
     ['yearSelect','builderYear','varianceYear','detailYear'].forEach(id=>populateSelect(id, STATE.years, true));
   }
   document.getElementById('builderYear').value = yr;
-  loadYear(yr).then(renderBuilderTable);
+  loadYear(yr).then(renderBuilderDeptView);
 }
 
-function renderBuilderTable(){
+// ---------- Budget Builder (Finance) — same experience as a single department's
+// unlocked view, with a department picker on top instead of a password gate ----------
+let builderExpand = { all:false, rows:{} };
+
+function onBuilderDeptChange(){ builderExpand = { all:false, rows:{} }; renderBuilderDeptView(); checkBuilderExistingNextYearBudget(); }
+function onBuilderYearChange(){ loadYear(Number(document.getElementById('builderYear').value)).then(()=>{ populateSelect('builderDept', getDisplayDepts()); renderBuilderDeptView(); checkBuilderExistingNextYearBudget(); }); }
+
+function switchBuilderTab(tab){
+  document.getElementById('builderTabCurrent').style.display = tab==='current' ? 'block' : 'none';
+  document.getElementById('builderTabNext').style.display = tab==='next' ? 'block' : 'none';
+  document.getElementById('bTabCurrentBtn').className = 'btn ' + (tab==='current' ? 'gold' : 'ghost');
+  document.getElementById('bTabNextBtn').className = 'btn ' + (tab==='next' ? 'gold' : 'ghost');
+}
+
+function toggleBuilderAllAccounts(){ builderExpand.all = !builderExpand.all; renderBuilderDeptView(); }
+function toggleBuilderAccountMonths(gl){ builderExpand.rows[gl] = !builderExpand.rows[gl]; renderBuilderDeptView(); }
+
+function renderBuilderDeptView(){
   const dept = document.getElementById('builderDept').value;
-  const rows = STATE.budget.filter(r=>r.Dept===dept);
-  const byGL = {};
-  rows.forEach(r=>{ byGL[r.GLAccount] = byGL[r.GLAccount]||{cat:r.AccountType,total:0}; byGL[r.GLAccount].total += Number(r.Amount||0); });
-  const keys = Object.keys(byGL);
-  let html = `<tr><th>Account</th><th>Type</th><th class="num">Annual total</th><th></th></tr>`;
-  if(!keys.length){ html += `<tr><td colspan="4">${emptyState('No line items for this department yet — add one')}</td></tr>`; }
-  keys.forEach(k=>{
-    html += `<tr>
-      <td>${k}</td>
-      <td><span class="pill flat">${byGL[k].cat||'Opex'}</span></td>
-      <td class="num mono">${fmt(byGL[k].total)}</td>
-      <td><button class="btn ghost" style="padding:5px 10px; font-size:12px;" onclick="deleteLine('${dept}','${k.replace(/'/g,"\\'")}')">Delete</button></td>
-    </tr>`;
+  if(!dept) return;
+  const b = STATE.budget.filter(r=>r.Dept===dept);
+  const a = STATE.actual.filter(r=>r.Dept===dept);
+  const glSet = [...new Set([...b.map(r=>r.GLAccount), ...a.map(r=>r.GLAccount)])].sort();
+
+  const monthlyOf = (rows, gl) => { const arr=Array(12).fill(0); rows.filter(r=>r.GLAccount===gl).forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) arr[m-1]+=Number(r.Amount||0); }); return arr; };
+  const sum = arr => arr.reduce((s,v)=>s+v,0);
+
+  let totalB=0, totalA=0;
+  let rowsHtml = '';
+  glSet.forEach(gl=>{
+    const bMonths = monthlyOf(b, gl), aMonths = monthlyOf(a, gl);
+    const bt = sum(bMonths), at = sum(aMonths);
+    totalB += bt; totalA += at;
+    const isOpen = !!builderExpand.rows[gl];
+    const glEsc = gl.replace(/'/g,"\\'");
+    rowsHtml += `<tr style="cursor:pointer;" onclick="toggleBuilderAccountMonths('${glEsc}')">
+      <td style="padding-left:20px;">${isOpen?'▾':'▸'} ${gl}</td><td class="num mono">${fmt(bt)}</td><td class="num mono">${fmt(at)}</td>
+      <td class="num mono" style="color:${bt-at<0?'var(--bad)':'var(--good)'}">${fmt(bt-at)}</td></tr>`;
+    if(isOpen){
+      MONTHS.forEach((m,mi)=>{
+        rowsHtml += `<tr style="background:var(--paper);">
+          <td style="padding-left:44px; font-size:12.5px; color:var(--muted);">${m}</td>
+          <td class="num mono" style="font-size:12.5px;">${fmt(bMonths[mi])}</td>
+          <td class="num mono" style="font-size:12.5px;">${fmt(aMonths[mi])}</td>
+          <td class="num mono" style="font-size:12.5px; color:${bMonths[mi]-aMonths[mi]<0?'var(--bad)':'var(--good)'}">${fmt(bMonths[mi]-aMonths[mi])}</td></tr>`;
+      });
+    }
   });
-  document.getElementById('builderTable').innerHTML = html;
+
+  let html = `<tr><th>Account</th><th class="num">Budget</th><th class="num">Actual</th><th class="num">Variance</th></tr>`;
+  html += `<tr style="font-weight:800; cursor:pointer;" onclick="toggleBuilderAllAccounts()">
+    <td>${builderExpand.all?'▾':'▸'} All accounts (${glSet.length})</td><td class="num mono">${fmt(totalB)}</td><td class="num mono">${fmt(totalA)}</td>
+    <td class="num mono" style="color:${totalB-totalA<0?'var(--bad)':'var(--good)'}">${fmt(totalB-totalA)}</td></tr>`;
+  if(builderExpand.all) html += rowsHtml;
+
+  document.getElementById('builderCompareTable').innerHTML = html || `<tr><td>${emptyState('No data')}</td></tr>`;
+  document.getElementById('bNextYearSuggestionWrap').style.display='none';
+  document.getElementById('bItemLevelWrap').style.display='none';
+  document.getElementById('bNextYearPct').value='';
+  document.getElementById('bNextYearFixed').value='';
+
+  renderBuilderBudgetDetailTable(dept, b, glSet, monthlyOf);
+}
+
+function renderBuilderBudgetDetailTable(dept, budgetRows, glSet, monthlyOf){
+  const header = ['Line'].concat(MONTHS).concat(['Total']);
+  let html = `<tr>${header.map(h=>`<th${h!=='Line'?' class="num"':''}>${h}</th>`).join('')}</tr>`;
+  html += `<tr style="font-weight:800; background:var(--grape-soft);"><td colspan="${header.length}">${dept}</td></tr>`;
+
+  const totals = Array(12).fill(0);
+  const glsWithBudget = glSet.filter(gl => budgetRows.some(r=>r.GLAccount===gl));
+  glsWithBudget.forEach(gl=>{
+    const bMonths = monthlyOf(budgetRows, gl);
+    const rowTotal = bMonths.reduce((s,v)=>s+v,0);
+    html += `<tr><td style="padding-left:16px;">${gl}</td>${bMonths.map((v,i)=>{ totals[i]+=v; return `<td class="num mono">${fmt(v)}</td>`; }).join('')}<td class="num mono" style="font-weight:700;">${fmt(rowTotal)}</td></tr>`;
+  });
+  const grandTotal = totals.reduce((s,v)=>s+v,0);
+  html += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>TOTAL — ${dept}</td>${totals.map(v=>`<td class="num mono">${fmt(v)}</td>`).join('')}<td class="num mono">${fmt(grandTotal)}</td></tr>`;
+
+  document.getElementById('builderDetailTable').innerHTML = glsWithBudget.length ? html : `<tr><td>${emptyState('No budget data')}</td></tr>`;
+}
+
+let builderNextYearSuggestion = null;
+let builderNextYearMonthsOpen = false;
+function toggleBuilderNextYearMonths(){ builderNextYearMonthsOpen = !builderNextYearMonthsOpen; renderBuilderNextYearSuggestionTable(); }
+
+function generateBuilderNextYearSuggestion(){
+  const dept = document.getElementById('builderDept').value;
+  const b = STATE.budget.filter(r=>r.Dept===dept);
+  const a = STATE.actual.filter(r=>r.Dept===dept);
+  const currentBudgetTotal = b.reduce((s,r)=>s+Number(r.Amount||0),0);
+
+  const pct = parseFloat(document.getElementById('bNextYearPct').value);
+  const fixed = parseFloat(document.getElementById('bNextYearFixed').value);
+  let nextTotal;
+  if(!isNaN(fixed) && fixed>0){ nextTotal = fixed; }
+  else if(!isNaN(pct)){ nextTotal = currentBudgetTotal * (1 + pct/100); }
+  else { toast('Enter a % increase or a specific total'); return; }
+
+  const method = document.getElementById('bNextYearShapeMethod').value;
+  let shape;
+  if(method === 'equal'){
+    shape = Array(12).fill(1/12);
+  } else {
+    const sourceRows = method === 'actual' ? a : b;
+    const monthTotals = Array(12).fill(0);
+    sourceRows.forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) monthTotals[m-1]+=Number(r.Amount||0); });
+    const sourceTotal = monthTotals.reduce((s,v)=>s+v,0);
+    shape = sourceTotal>0 ? monthTotals.map(v=>v/sourceTotal) : Array(12).fill(1/12);
+  }
+
+  const suggested = shape.map(p=>Math.round(nextTotal*p*100)/100);
+  builderNextYearSuggestion = { dept, total: nextTotal, monthly: suggested };
+  builderNextYearMonthsOpen = false;
+  renderBuilderNextYearSuggestionTable();
+  document.getElementById('bNextYearSuggestionWrap').style.display='block';
+}
+
+function renderBuilderNextYearSuggestionTable(){
+  if(!builderNextYearSuggestion) return;
+  let html = `<tr><th>Line</th><th class="num">Amount</th></tr>`;
+  html += `<tr style="font-weight:800; cursor:pointer;" onclick="toggleBuilderNextYearMonths()">
+    <td>${builderNextYearMonthsOpen?'▾':'▸'} Total suggested budget</td><td class="num mono">${fmt(builderNextYearSuggestion.total)}</td></tr>`;
+  if(builderNextYearMonthsOpen){
+    MONTHS.forEach((m,i)=> html += `<tr style="background:var(--paper);"><td style="padding-left:24px; font-size:12.5px; color:var(--muted);">${m}</td><td class="num mono" style="font-size:12.5px;">${fmt(builderNextYearSuggestion.monthly[i])}</td></tr>`);
+  }
+  document.getElementById('bNextYearTable').innerHTML = html;
+}
+
+let builderItemLevelBreakdown = null;
+
+function generateBuilderItemLevelBreakdown(){
+  if(!builderNextYearSuggestion){ toast('Generate a suggestion first'); return; }
+  const dept = builderNextYearSuggestion.dept;
+  const nextTotal = builderNextYearSuggestion.total;
+  const nextYear = STATE.year + 1;
+  const b = STATE.budget.filter(r=>r.Dept===dept);
+  const deptTotal = b.reduce((s,r)=>s+Number(r.Amount||0),0);
+
+  const accounts = [...new Set(b.map(r=>r.GLAccount))].sort();
+  const rows = {};
+  accounts.forEach(gl=>{
+    const acctRows = b.filter(r=>r.GLAccount===gl);
+    const type = acctRows[0].AccountType || 'Opex';
+    const acctTotal = acctRows.reduce((s,r)=>s+Number(r.Amount||0),0);
+    const share = deptTotal>0 ? acctTotal/deptTotal : 0;
+    const nextAcctTotal = nextTotal * share;
+    const monthTotals = Array(12).fill(0);
+    acctRows.forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) monthTotals[m-1]+=Number(r.Amount||0); });
+    const shape = acctTotal>0 ? monthTotals.map(v=>v/acctTotal) : Array(12).fill(1/12);
+    rows[gl] = { type, monthly: shape.map(p=>Math.round(nextAcctTotal*p*100)/100) };
+  });
+
+  builderItemLevelBreakdown = { dept, year: nextYear, rows };
+  renderBuilderItemLevelTable();
+  document.getElementById('bItemLevelWrap').style.display='block';
+  document.getElementById('bSubmitStatusMsg').style.display='none';
+}
+
+function renderBuilderItemLevelTable(){
+  if(!builderItemLevelBreakdown) return;
+  const { dept, rows } = builderItemLevelBreakdown;
+  const header = ['Line'].concat(MONTHS).concat(['Total']);
+  let html = `<tr>${header.map(h=>`<th${h!=='Line'?' class="num"':''}>${h}</th>`).join('')}</tr>`;
+  html += `<tr style="font-weight:800; background:var(--grape-soft);"><td colspan="${header.length}">${dept}</td></tr>`;
+
+  const totals = Array(12).fill(0);
+  Object.keys(rows).sort().forEach(gl=>{
+    const glEsc = gl.replace(/'/g,"\\'").replace(/"/g,'&quot;');
+    const rowTotal = rows[gl].monthly.reduce((s,v)=>s+v,0);
+    html += `<tr><td style="padding-left:16px;">${gl}</td>`;
+    rows[gl].monthly.forEach((v,i)=>{
+      totals[i]+=v;
+      html += `<td class="num"><input type="number" class="mono bItemLevelInput" data-gl="${glEsc}" data-type="${rows[gl].type}" data-month="${i+1}" value="${v}" style="width:90px; text-align:left; padding:4px 6px; font-size:12px;"></td>`;
+    });
+    html += `<td class="num mono" style="font-weight:700;">${fmt(rowTotal)}</td></tr>`;
+  });
+  const grandTotal = totals.reduce((s,v)=>s+v,0);
+  html += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>TOTAL — ${dept}</td>${totals.map(v=>`<td class="num mono">${fmt(v)}</td>`).join('')}<td class="num mono">${fmt(grandTotal)}</td></tr>`;
+  document.getElementById('bItemLevelTable').innerHTML = html;
+}
+
+async function submitBuilderItemLevelBudget(){
+  if(!builderItemLevelBreakdown){ toast('Generate the breakdown first'); return; }
+  const rows = [];
+  document.querySelectorAll('.bItemLevelInput').forEach(inp=>{
+    rows.push({ glAccount: inp.dataset.gl, accountType: inp.dataset.type, month: Number(inp.dataset.month), amount: Number(inp.value)||0 });
+  });
+  toast('Submitting for approval...');
+  const res = await apiPost({ action:'submitBudgetForApproval', year: builderItemLevelBreakdown.year, dept: builderItemLevelBreakdown.dept, rows });
+  if(res.ok){
+    toast(`✅ Submitted ${builderItemLevelBreakdown.year} budget for ${builderItemLevelBreakdown.dept}`);
+    checkBuilderExistingNextYearBudget();
+    switchBuilderTab('next');
+  } else {
+    const statusEl = document.getElementById('bSubmitStatusMsg');
+    statusEl.style.color = 'var(--bad)';
+    statusEl.textContent = 'Error: ' + res.error;
+    statusEl.style.display='block';
+    toast('Submit failed');
+  }
+}
+
+async function checkBuilderExistingNextYearBudget(){
+  const dept = document.getElementById('builderDept').value;
+  if(!dept) return;
+  const nextYear = STATE.year + 1;
+  document.getElementById('bTabNextBtn').style.display='none';
+  try{
+    const data = await apiGet('year='+nextYear);
+    const rows = (data.budget||[]).filter(r=>r.Dept===dept);
+    if(rows.length){
+      document.getElementById('bTabNextBtn').style.display='inline-block';
+      renderBuilderNextYearEditTable(dept, nextYear, rows);
+    }
+  }catch(e){ /* silent */ }
+}
+
+function renderBuilderNextYearEditTable(dept, year, rows){
+  const accounts = [...new Set(rows.map(r=>r.GLAccount))].sort();
+  let html = `<tr><th>Account</th>${MONTHS.map(m=>`<th class="num">${m}</th>`).join('')}<th class="num">Total</th></tr>`;
+  accounts.forEach(gl=>{
+    const monthly = Array(12).fill(0);
+    rows.filter(r=>r.GLAccount===gl).forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) monthly[m-1]=Number(r.Amount||0); });
+    const glEsc = gl.replace(/'/g,"\\'").replace(/"/g,'&quot;');
+    const rowTotal = monthly.reduce((s,v)=>s+v,0);
+    html += `<tr><td>${gl}</td>${monthly.map((v,i)=>`<td class="num"><input type="number" class="mono bNextYearEditInput" data-gl="${glEsc}" data-m="${i+1}" value="${v}" style="width:80px; text-align:left; font-size:12px; padding:4px 6px;"></td>`).join('')}<td class="num mono" style="font-weight:700;">${fmt(rowTotal)}</td></tr>`;
+  });
+  document.getElementById('bNextYearEditTable').innerHTML = html;
+  document.getElementById('bNextYearEditTable').dataset.dept = dept;
+  document.getElementById('bNextYearEditTable').dataset.year = year;
+}
+
+async function updateBuilderNextYearBudget(){
+  const tableEl = document.getElementById('bNextYearEditTable');
+  const dept = tableEl.dataset.dept, year = Number(tableEl.dataset.year);
+  const rows = [];
+  document.querySelectorAll('.bNextYearEditInput').forEach(inp=>{
+    rows.push({ year, dept, glAccount:inp.dataset.gl, accountType:'Opex', month:Number(inp.dataset.m), amount:Number(inp.value)||0 });
+  });
+  toast('Saving...');
+  const res = await apiPost({action:'saveBudget', rows});
+  if(res.ok) toast(`Updated ${year} budget for ${dept}`);
+  else toast('Error: '+res.error);
 }
 
 let editingContext = null;
@@ -1268,16 +1527,19 @@ async function saveLine(){
   });
   toast('Saving...');
   const res = await apiPost({action:'saveBudget', rows});
-  if(res.ok){ toast('Line item saved'); closeLineModal(); await loadYear(STATE.year); renderBuilderTable(); }
+  if(res.ok){ toast('Line item saved'); closeLineModal(); await loadYear(STATE.year); renderBuilderDeptView(); }
   else toast('Error: '+res.error);
 }
 async function deleteLine(dept, glAccount){
   if(!confirm('Delete this line item permanently?')) return;
   const res = await apiPost({action:'deleteBudgetLine', year:STATE.year, dept, glAccount});
-  if(res.ok){ toast('Deleted'); await loadYear(STATE.year); renderBuilderTable(); }
+  if(res.ok){ toast('Deleted'); await loadYear(STATE.year); renderBuilderDeptView(); }
 }
 
 // ---------- Variance ----------
+let varianceExpanded = {};
+function toggleVarianceDept(dept){ varianceExpanded[dept] = !varianceExpanded[dept]; renderVarianceTable(); }
+
 function renderVarianceTable(){
   const deptRows = getDisplayDepts().map(d=>({d, b:deptBudgetTotal(d), a:deptActualTotal(d)})).filter(r=>r.b!==0 || r.a!==0);
 
@@ -1297,10 +1559,24 @@ function renderVarianceTable(){
   deptRows.forEach(({d,b,a})=>{
     const diff = b-a; const pct = b? (a/b*100):0;
     const status = pct>105? {t:'Over budget',c:'bad'} : (pct<80? {t:'Under-spent',c:'warn'} : {t:'On track',c:'good'});
-    html += `<tr><td><b>${d}</b></td><td class="num mono">${fmt(b)}</td><td class="num mono">${fmt(a)}</td>
+    const isOpen = !!varianceExpanded[d];
+    const dEsc = d.replace(/'/g,"\\'");
+    html += `<tr style="cursor:pointer;" onclick="toggleVarianceDept('${dEsc}')"><td><b>${isOpen?'▾':'▸'} ${d}</b></td><td class="num mono">${fmt(b)}</td><td class="num mono">${fmt(a)}</td>
       <td class="num mono" style="color:${diff<0?'var(--bad)':'var(--good)'}">${fmt(diff)}</td>
       <td class="num mono">${pct.toFixed(0)}%</td>
       <td><span class="pill ${status.c}">${status.t}</span></td></tr>`;
+    if(isOpen){
+      const bRows = STATE.budget.filter(r=>r.Dept===d), aRows = STATE.actual.filter(r=>r.Dept===d);
+      const glSet = [...new Set([...bRows.map(r=>r.GLAccount), ...aRows.map(r=>r.GLAccount)])].sort();
+      glSet.forEach(gl=>{
+        const bt = bRows.filter(r=>r.GLAccount===gl).reduce((s,r)=>s+Number(r.Amount||0),0);
+        const at = aRows.filter(r=>r.GLAccount===gl).reduce((s,r)=>s+Number(r.Amount||0),0);
+        const gdiff = bt-at, gpct = bt? (at/bt*100):0;
+        html += `<tr style="background:var(--paper);"><td style="padding-left:32px; font-size:12.5px; color:var(--muted);">${gl}</td><td class="num mono" style="font-size:12.5px;">${fmt(bt)}</td><td class="num mono" style="font-size:12.5px;">${fmt(at)}</td>
+          <td class="num mono" style="font-size:12.5px; color:${gdiff<0?'var(--bad)':'var(--good)'}">${fmt(gdiff)}</td>
+          <td class="num mono" style="font-size:12.5px;">${gpct.toFixed(0)}%</td><td></td></tr>`;
+      });
+    }
   });
   document.getElementById('varianceTable').innerHTML = html;
 }
@@ -1326,7 +1602,6 @@ document.addEventListener('input', (e)=>{
 });
 document.addEventListener('change', (e)=>{
   if(e.target.id==='detailDept') renderDetailTable();
-  if(e.target.id==='builderYear') loadYear(e.target.value).then(renderBuilderTable);
   if(e.target.id==='varianceYear') loadYear(e.target.value).then(renderVarianceTable);
   if(e.target.id==='incomeYear') loadYear(e.target.value).then(renderIncomeStatement);
   if(e.target.id==='detailYear') loadYear(e.target.value).then(renderDetailTable);
@@ -1334,5 +1609,3 @@ document.addEventListener('change', (e)=>{
 </script>
 </body>
 </html>
-
-
