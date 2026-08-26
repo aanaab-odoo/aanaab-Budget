@@ -429,12 +429,19 @@
       <div class="page-head">
         <div>
           <div class="page-title">Income Statement</div>
-          <div class="page-sub">Exactly what's in the Income_Statement sheet for this year — Actual, Actual last year, Budget, and Forecast</div>
+          <div class="page-sub">Exactly what's in the Income_Statement sheet for this year — Actual last year, Actual this year, Budget, and Forecast</div>
         </div>
         <select class="year-select" id="incomeYear"></select>
       </div>
       <div class="card">
         <table id="incomeTable"></table>
+      </div>
+
+      <div id="incomeNextYearWrap" style="display:none;">
+        <div class="section-title">Next Year's Income Statement</div>
+        <div class="card">
+          <table id="incomeNextYearTable"></table>
+        </div>
       </div>
     </div>
 
@@ -1107,9 +1114,26 @@ function navTo(page){
 
 // ---------- Income Statement ----------
 function typeTotals(rows, type){ return rows.filter(r=>(r.AccountType||'Opex')===type).reduce((s,r)=>s+Number(r.Amount||0),0); }
+function renderIncomeStatementTableInto_(elId, data, fallbackYear){
+  const wrap = document.getElementById(elId);
+  if(!data.rows || !data.rows.length){
+    wrap.innerHTML = `<tr><td>${emptyState('Run "Build Income Statement sheet" in the Google Sheet for '+fallbackYear+' first')}</td></tr>`;
+    return false;
+  }
+  const header = data.header && data.header.length ? data.header : ['Line', 'Actual '+(fallbackYear-1), 'Actual '+fallbackYear, 'Budget '+fallbackYear, 'Forecast '+fallbackYear];
+  let html = `<tr>${header.map((h,i)=>`<th${i>0?' class="num"':''}>${h}</th>`).join('')}</tr>`;
+  data.rows.forEach(r=>{
+    const style = r.bold ? 'font-weight:800; border-top:2px solid var(--line);' : '';
+    html += `<tr style="${style}"><td>${r.label}</td><td class="num mono">${fmt(r.actualPrior)}</td><td class="num mono">${fmt(r.actualYear)}</td><td class="num mono">${fmt(r.budgetYear)}</td><td class="num mono">${fmt(r.forecastYear)}</td></tr>`;
+  });
+  wrap.innerHTML = html;
+  return true;
+}
+
 async function renderIncomeStatement(){
   const wrap = document.getElementById('incomeTable');
   wrap.innerHTML = `<tr><td>${emptyState('Loading…')}</td></tr>`;
+  document.getElementById('incomeNextYearWrap').style.display = 'none';
   let data;
   try{
     data = await apiGet('action=incomeStatement&year='+STATE.year);
@@ -1117,17 +1141,18 @@ async function renderIncomeStatement(){
     wrap.innerHTML = `<tr><td>${emptyState('Could not load Income_Statement_'+STATE.year)}</td></tr>`;
     return;
   }
-  if(!data.rows || !data.rows.length){
-    wrap.innerHTML = `<tr><td>${emptyState('Run "Build Income Statement sheet" in the Google Sheet for '+STATE.year+' first')}</td></tr>`;
-    return;
-  }
-  const header = data.header && data.header.length ? data.header : ['Line', 'Actual '+(STATE.year-1), 'Actual '+STATE.year, 'Budget '+STATE.year, 'Forecast '+STATE.year];
-  let html = `<tr>${header.map((h,i)=>`<th${i>0?' class="num"':''}>${h}</th>`).join('')}</tr>`;
-  data.rows.forEach(r=>{
-    const style = r.bold ? 'font-weight:800; border-top:2px solid var(--line);' : '';
-    html += `<tr style="${style}"><td>${r.label}</td><td class="num mono">${fmt(r.actualPrior)}</td><td class="num mono">${fmt(r.actualYear)}</td><td class="num mono">${fmt(r.budgetYear)}</td><td class="num mono">${fmt(r.forecastYear)}</td></tr>`;
-  });
-  wrap.innerHTML = html;
+  renderIncomeStatementTableInto_('incomeTable', data, STATE.year);
+
+  // Show next year's income statement too, once it's been built (i.e. next year's
+  // budget is complete and "Build Income Statement sheet" has been run for it).
+  const nextYear = STATE.year + 1;
+  try{
+    const nextData = await apiGet('action=incomeStatement&year='+nextYear);
+    if(nextData.rows && nextData.rows.length){
+      document.getElementById('incomeNextYearWrap').style.display = 'block';
+      renderIncomeStatementTableInto_('incomeNextYearTable', nextData, nextYear);
+    }
+  }catch(e){ /* next year just isn't ready yet — stays hidden */ }
 }
 
 // ---------- Aggregation helpers ----------
