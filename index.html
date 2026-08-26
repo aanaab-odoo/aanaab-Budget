@@ -443,6 +443,43 @@
           <table id="incomeNextYearTable"></table>
         </div>
       </div>
+
+      <div class="section-title">Compare Two Income Statements</div>
+      <div class="card">
+        <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:end;">
+          <div style="min-width:160px;">
+            <label>Statement A — Year</label>
+            <select id="compareYearA"></select>
+          </div>
+          <div style="min-width:160px;">
+            <label>Statement A — Column</label>
+            <select id="compareColA">
+              <option value="actualPrior">Actual (prior year)</option>
+              <option value="actualYear" selected>Actual</option>
+              <option value="budgetYear">Budget</option>
+              <option value="forecastYear">Forecast</option>
+            </select>
+          </div>
+          <div style="color:var(--muted); padding-bottom:10px;">vs</div>
+          <div style="min-width:160px;">
+            <label>Statement B — Year</label>
+            <select id="compareYearB"></select>
+          </div>
+          <div style="min-width:160px;">
+            <label>Statement B — Column</label>
+            <select id="compareColB">
+              <option value="actualPrior">Actual (prior year)</option>
+              <option value="actualYear">Actual</option>
+              <option value="budgetYear">Budget</option>
+              <option value="forecastYear" selected>Forecast</option>
+            </select>
+          </div>
+          <button class="btn gold" onclick="compareIncomeStatements()">Compare</button>
+        </div>
+        <div id="incomeCompareWrap" style="margin-top:20px; display:none;">
+          <table id="incomeCompareTable"></table>
+        </div>
+      </div>
     </div>
 
     <!-- DETAIL -->
@@ -1114,6 +1151,24 @@ function navTo(page){
 
 // ---------- Income Statement ----------
 function typeTotals(rows, type){ return rows.filter(r=>(r.AccountType||'Opex')===type).reduce((s,r)=>s+Number(r.Amount||0),0); }
+// Matches the manual row-grouping already set up in the Google Sheet: these detail
+// lines start hidden, and clicking their bold subtotal row expands them in place.
+const INCOME_GROUPS = {
+  'Total Revenue': ['B2C', 'B2B', 'B2G'],
+  'Cost of revenue': ['Projects COGS', 'Revenue Share', 'Hosting', 'Content', 'Amortisation'],
+  'Other operating expenses': ['Dues and Subscriptions', 'Taxs', 'Rent', 'internet', 'Bank Fees', 'Z Store', 'Government Exp', 'Payment Methods Fees', 'Accreditation', 'others']
+};
+const INCOME_GROUP_MEMBERS = new Set(Object.values(INCOME_GROUPS).flat());
+let incomeGroupExpanded = {};
+let lastIncomeData = null, lastIncomeNextData = null;
+
+function toggleIncomeGroup(elId, label){
+  const key = elId + '|' + label;
+  incomeGroupExpanded[key] = !incomeGroupExpanded[key];
+  if(elId === 'incomeTable' && lastIncomeData) renderIncomeStatementTableInto_('incomeTable', lastIncomeData, STATE.year);
+  if(elId === 'incomeNextYearTable' && lastIncomeNextData) renderIncomeStatementTableInto_('incomeNextYearTable', lastIncomeNextData, STATE.year+1);
+}
+
 function renderIncomeStatementTableInto_(elId, data, fallbackYear){
   const wrap = document.getElementById(elId);
   if(!data.rows || !data.rows.length){
@@ -1121,10 +1176,40 @@ function renderIncomeStatementTableInto_(elId, data, fallbackYear){
     return false;
   }
   const header = data.header && data.header.length ? data.header : ['Line', 'Actual '+(fallbackYear-1), 'Actual '+fallbackYear, 'Budget '+fallbackYear, 'Forecast '+fallbackYear];
+  const byLabel = {};
+  data.rows.forEach(r=>{ byLabel[r.label] = r; });
+
+  function rowHtml(r, indent){
+    const style = r.bold ? 'font-weight:800; border-top:2px solid var(--line);' : '';
+    const pad = indent ? `padding-left:${indent}px; font-size:12.5px; color:var(--muted);` : '';
+    return `<tr style="${style}${indent?' background:var(--paper);':''}"><td style="${pad}">${r.label}</td>
+      <td class="num mono"${indent?' style="font-size:12.5px;"':''}>${fmt(r.actualPrior)}</td>
+      <td class="num mono"${indent?' style="font-size:12.5px;"':''}>${fmt(r.actualYear)}</td>
+      <td class="num mono"${indent?' style="font-size:12.5px;"':''}>${fmt(r.budgetYear)}</td>
+      <td class="num mono"${indent?' style="font-size:12.5px;"':''}>${fmt(r.forecastYear)}</td></tr>`;
+  }
+
   let html = `<tr>${header.map((h,i)=>`<th${i>0?' class="num"':''}>${h}</th>`).join('')}</tr>`;
   data.rows.forEach(r=>{
-    const style = r.bold ? 'font-weight:800; border-top:2px solid var(--line);' : '';
-    html += `<tr style="${style}"><td>${r.label}</td><td class="num mono">${fmt(r.actualPrior)}</td><td class="num mono">${fmt(r.actualYear)}</td><td class="num mono">${fmt(r.budgetYear)}</td><td class="num mono">${fmt(r.forecastYear)}</td></tr>`;
+    if(INCOME_GROUP_MEMBERS.has(r.label)) return; // rendered inline under its group header instead
+    if(INCOME_GROUPS[r.label]){
+      const key = elId + '|' + r.label;
+      const isOpen = !!incomeGroupExpanded[key];
+      html += `<tr style="font-weight:800; border-top:2px solid var(--line); cursor:pointer;" onclick="toggleIncomeGroup('${elId}','${r.label.replace(/'/g,"\\'")}')">
+        <td>${isOpen?'▾':'▸'} ${r.label}</td>
+        <td class="num mono">${fmt(r.actualPrior)}</td>
+        <td class="num mono">${fmt(r.actualYear)}</td>
+        <td class="num mono">${fmt(r.budgetYear)}</td>
+        <td class="num mono">${fmt(r.forecastYear)}</td></tr>`;
+      if(isOpen){
+        INCOME_GROUPS[r.label].forEach(memberLabel=>{
+          const m = byLabel[memberLabel];
+          if(m) html += rowHtml(m, 24);
+        });
+      }
+    } else {
+      html += rowHtml(r, 0);
+    }
   });
   wrap.innerHTML = html;
   return true;
@@ -1141,6 +1226,7 @@ async function renderIncomeStatement(){
     wrap.innerHTML = `<tr><td>${emptyState('Could not load Income_Statement_'+STATE.year)}</td></tr>`;
     return;
   }
+  lastIncomeData = data;
   renderIncomeStatementTableInto_('incomeTable', data, STATE.year);
 
   // Show next year's income statement too, once it's been built (i.e. next year's
@@ -1149,10 +1235,69 @@ async function renderIncomeStatement(){
   try{
     const nextData = await apiGet('action=incomeStatement&year='+nextYear);
     if(nextData.rows && nextData.rows.length){
+      lastIncomeNextData = nextData;
       document.getElementById('incomeNextYearWrap').style.display = 'block';
       renderIncomeStatementTableInto_('incomeNextYearTable', nextData, nextYear);
     }
   }catch(e){ /* next year just isn't ready yet — stays hidden */ }
+  populateIncomeCompareYearSelects();
+}
+
+function populateIncomeCompareYearSelects(){
+  const years = STATE.years.length ? STATE.years : [STATE.year];
+  const extra = years.includes(STATE.year+1) ? years : years.concat([STATE.year+1]);
+  populateSelect('compareYearA', extra, true);
+  populateSelect('compareYearB', extra, true);
+  document.getElementById('compareYearA').value = STATE.year;
+  document.getElementById('compareYearB').value = STATE.year+1;
+}
+
+async function fetchIncomeStatementCached_(year){
+  if(year === STATE.year && lastIncomeData) return lastIncomeData;
+  if(year === STATE.year+1 && lastIncomeNextData) return lastIncomeNextData;
+  return apiGet('action=incomeStatement&year='+year);
+}
+
+const COMPARE_COL_LABELS = { actualPrior:'Actual (prior year)', actualYear:'Actual', budgetYear:'Budget', forecastYear:'Forecast' };
+
+async function compareIncomeStatements(){
+  const yearA = Number(document.getElementById('compareYearA').value);
+  const colA = document.getElementById('compareColA').value;
+  const yearB = Number(document.getElementById('compareYearB').value);
+  const colB = document.getElementById('compareColB').value;
+  const wrap = document.getElementById('incomeCompareWrap');
+  wrap.style.display = 'block';
+  document.getElementById('incomeCompareTable').innerHTML = `<tr><td>${emptyState('Loading…')}</td></tr>`;
+
+  let dataA, dataB;
+  try{
+    dataA = await fetchIncomeStatementCached_(yearA);
+    dataB = await fetchIncomeStatementCached_(yearB);
+  }catch(e){
+    document.getElementById('incomeCompareTable').innerHTML = `<tr><td>${emptyState('Could not load one of the statements')}</td></tr>`;
+    return;
+  }
+  if(!dataA.rows || !dataA.rows.length || !dataB.rows || !dataB.rows.length){
+    document.getElementById('incomeCompareTable').innerHTML = `<tr><td>${emptyState('One of the selected years has no Income Statement built yet')}</td></tr>`;
+    return;
+  }
+
+  const byLabelB = {};
+  dataB.rows.forEach(r=>{ byLabelB[r.label] = r; });
+
+  const labelA = yearA + ' ' + COMPARE_COL_LABELS[colA];
+  const labelB = yearB + ' ' + COMPARE_COL_LABELS[colB];
+  let html = `<tr><th>Line</th><th class="num">${labelA}</th><th class="num">${labelB}</th><th class="num">Variance</th></tr>`;
+  dataA.rows.forEach(r=>{
+    const other = byLabelB[r.label];
+    const valA = Number(r[colA]) || 0;
+    const valB = other ? (Number(other[colB]) || 0) : 0;
+    const diff = valA - valB;
+    const style = r.bold ? 'font-weight:800; border-top:2px solid var(--line);' : '';
+    html += `<tr style="${style}"><td>${r.label}</td><td class="num mono">${fmt(valA)}</td><td class="num mono">${fmt(valB)}</td>
+      <td class="num mono" style="color:${diff<0?'var(--bad)':'var(--good)'}">${fmt(diff)}</td></tr>`;
+  });
+  document.getElementById('incomeCompareTable').innerHTML = html;
 }
 
 // ---------- Aggregation helpers ----------
