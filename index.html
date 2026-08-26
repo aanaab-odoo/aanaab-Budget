@@ -626,13 +626,21 @@ async function apiPost(payload){
   return res.json();
 }
 
+// "Expenses" and "Unassigned" aren't real departments (they're catch-all buckets for
+// unattributed accounting entries) — excluded everywhere: department picker,
+// dashboard totals, thermometers, charts, variance analysis, and top-variance lists.
+const EXCLUDED_DEPTS = ['Expenses', 'Unassigned'];
+function isRealDept(d){ return !EXCLUDED_DEPTS.includes(d); }
+function realBudgetRows(){ return STATE.budget.filter(r=>isRealDept(r.Dept)); }
+function realActualRows(){ return STATE.actual.filter(r=>isRealDept(r.Dept)); }
+
 // Real department names come from the data itself (Odoo analytic accounts), not a
 // fixed list — the fixed DEPTS above is only a fallback for picking a department
 // before any budget/actual data exists yet.
 function getDisplayDepts(){
   const set = new Set();
-  STATE.budget.forEach(r=>{ if(r.Dept) set.add(r.Dept); });
-  STATE.actual.forEach(r=>{ if(r.Dept) set.add(r.Dept); });
+  STATE.budget.forEach(r=>{ if(r.Dept && isRealDept(r.Dept)) set.add(r.Dept); });
+  STATE.actual.forEach(r=>{ if(r.Dept && isRealDept(r.Dept)) set.add(r.Dept); });
   if(set.size===0) DEPTS.forEach(d=>set.add(d));
   return [...set].sort();
 }
@@ -1308,8 +1316,8 @@ function monthTotals(rows){ const arr=Array(12).fill(0); rows.forEach(r=>{ const
 function variancesByAccount(){
   const key = r => r.Dept+'||'+r.GLAccount;
   const b = {}, a = {};
-  STATE.budget.forEach(r=>{ const k=key(r); b[k]=(b[k]||0)+Number(r.Amount||0); });
-  STATE.actual.forEach(r=>{ const k=key(r); a[k]=(a[k]||0)+Number(r.Amount||0); });
+  realBudgetRows().forEach(r=>{ const k=key(r); b[k]=(b[k]||0)+Number(r.Amount||0); });
+  realActualRows().forEach(r=>{ const k=key(r); a[k]=(a[k]||0)+Number(r.Amount||0); });
   const keys = new Set([...Object.keys(b), ...Object.keys(a)]);
   const out = [];
   keys.forEach(k=>{
@@ -1350,8 +1358,8 @@ function renderTopVariances(){
 
 // ---------- Dashboard ----------
 function renderAll(){
-  const totalBudget = STATE.budget.reduce((s,r)=>s+Number(r.Amount||0),0);
-  const totalActual = STATE.actual.reduce((s,r)=>s+Number(r.Amount||0),0);
+  const totalBudget = realBudgetRows().reduce((s,r)=>s+Number(r.Amount||0),0);
+  const totalActual = realActualRows().reduce((s,r)=>s+Number(r.Amount||0),0);
   const remaining = totalBudget - totalActual;
   const pctUsed = totalBudget? (totalActual/totalBudget*100):0;
   const now = new Date();
@@ -1383,7 +1391,7 @@ function renderAll(){
 
   // trend chart
   if(typeof Chart === 'undefined'){ console.warn('Chart.js failed to load — charts skipped'); return; }
-  const bM = monthTotals(STATE.budget), aM = monthTotals(STATE.actual);
+  const bM = monthTotals(realBudgetRows()), aM = monthTotals(realActualRows());
   if(trendChartInst) trendChartInst.destroy();
   trendChartInst = new Chart(document.getElementById('trendChart'), {
     type:'bar',
