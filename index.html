@@ -241,7 +241,7 @@
 
       <div class="section-title">Budget Detail — every account, every month</div>
       <div class="card">
-        <table id="deptBudgetDetailTable" style="font-size:12.5px;"></table>
+        <div style="overflow-x:auto;"><table id="deptBudgetDetailTable" style="font-size:12.5px; min-width:1400px;"></table></div>
       </div>
 
       <div class="section-title">Create Budget for Next Year</div>
@@ -280,7 +280,7 @@
             Each account gets the same share of the new total it had of this year's budget, split across months
             using that same account's own monthly pattern from this year. Edit anything you'd like to change.
           </p>
-          <table id="itemLevelTable" style="font-size:12.5px;"></table>
+          <div style="overflow-x:auto;"><table id="itemLevelTable" style="font-size:12.5px; min-width:1400px;"></table></div>
           <button class="btn gold" style="margin-top:14px;" onclick="submitItemLevelBudget()">Save & Submit for Finance Approval</button>
           <div id="submitStatusMsg" style="margin-top:10px; font-size:13px; display:none;"></div>
         </div>
@@ -290,7 +290,7 @@
     <div id="deptTabNext" style="display:none;">
       <div class="card">
         <p style="color:var(--muted); font-size:13px; margin:0 0 16px;">Edit any month directly, then save.</p>
-        <table id="nextYearEditTable"></table>
+        <div style="overflow-x:auto;"><table id="nextYearEditTable" style="min-width:1200px;"></table></div>
         <button class="btn gold" style="margin-top:14px;" onclick="updateNextYearBudget()">Save changes</button>
       </div>
     </div>
@@ -751,7 +751,7 @@ function renderDeptView(dept){
 // Full, always-expanded Budget detail: every account, every month, exactly like the
 // item-level next-year breakdown table — but read-only and for the CURRENT year's budget.
 function renderDeptBudgetDetailTable(dept, budgetRows, glSet, monthlyOf){
-  const header = ['Line'].concat(MONTHS);
+  const header = ['Line'].concat(MONTHS).concat(['Total']);
   let html = `<tr>${header.map(h=>`<th${h!=='Line'?' class="num"':''}>${h}</th>`).join('')}</tr>`;
   html += `<tr style="font-weight:800; background:var(--grape-soft);"><td colspan="${header.length}">${dept}</td></tr>`;
 
@@ -759,9 +759,11 @@ function renderDeptBudgetDetailTable(dept, budgetRows, glSet, monthlyOf){
   const glsWithBudget = glSet.filter(gl => budgetRows.some(r=>r.GLAccount===gl));
   glsWithBudget.forEach(gl=>{
     const bMonths = monthlyOf(budgetRows, gl);
-    html += `<tr><td style="padding-left:16px;">${gl}</td>${bMonths.map((v,i)=>{ totals[i]+=v; return `<td class="num mono">${fmt(v)}</td>`; }).join('')}</tr>`;
+    const rowTotal = bMonths.reduce((s,v)=>s+v,0);
+    html += `<tr><td style="padding-left:16px;">${gl}</td>${bMonths.map((v,i)=>{ totals[i]+=v; return `<td class="num mono">${fmt(v)}</td>`; }).join('')}<td class="num mono" style="font-weight:700;">${fmt(rowTotal)}</td></tr>`;
   });
-  html += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>TOTAL — ${dept}</td>${totals.map(v=>`<td class="num mono">${fmt(v)}</td>`).join('')}</tr>`;
+  const grandTotal = totals.reduce((s,v)=>s+v,0);
+  html += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>TOTAL — ${dept}</td>${totals.map(v=>`<td class="num mono">${fmt(v)}</td>`).join('')}<td class="num mono">${fmt(grandTotal)}</td></tr>`;
 
   document.getElementById('deptBudgetDetailTable').innerHTML = glsWithBudget.length ? html : `<tr><td>${emptyState('No budget data')}</td></tr>`;
 }
@@ -848,21 +850,23 @@ function generateItemLevelBreakdown(){
 function renderItemLevelTable(){
   if(!itemLevelBreakdown) return;
   const { dept, rows } = itemLevelBreakdown;
-  const header = ['Line'].concat(MONTHS);
+  const header = ['Line'].concat(MONTHS).concat(['Total']);
   let html = `<tr>${header.map(h=>`<th${h!=='Line'?' class="num"':''}>${h}</th>`).join('')}</tr>`;
   html += `<tr style="font-weight:800; background:var(--grape-soft);"><td colspan="${header.length}">${dept}</td></tr>`;
 
   const totals = Array(12).fill(0);
   Object.keys(rows).sort().forEach(gl=>{
     const glEsc = gl.replace(/'/g,"\\'").replace(/"/g,'&quot;');
+    const rowTotal = rows[gl].monthly.reduce((s,v)=>s+v,0);
     html += `<tr><td style="padding-left:16px;">${gl}</td>`;
     rows[gl].monthly.forEach((v,i)=>{
       totals[i]+=v;
       html += `<td class="num"><input type="number" class="mono itemLevelInput" data-gl="${glEsc}" data-type="${rows[gl].type}" data-month="${i+1}" value="${v}" style="width:90px; text-align:left; padding:4px 6px; font-size:12px;"></td>`;
     });
-    html += `</tr>`;
+    html += `<td class="num mono" style="font-weight:700;">${fmt(rowTotal)}</td></tr>`;
   });
-  html += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>TOTAL — ${dept}</td>${totals.map(v=>`<td class="num mono">${fmt(v)}</td>`).join('')}</tr>`;
+  const grandTotal = totals.reduce((s,v)=>s+v,0);
+  html += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>TOTAL — ${dept}</td>${totals.map(v=>`<td class="num mono">${fmt(v)}</td>`).join('')}<td class="num mono">${fmt(grandTotal)}</td></tr>`;
   document.getElementById('itemLevelTable').innerHTML = html;
 }
 
@@ -888,12 +892,13 @@ async function submitItemLevelBudget(){
 
 function renderNextYearEditTable(dept, year, rows){
   const accounts = [...new Set(rows.map(r=>r.GLAccount))].sort();
-  let html = `<tr><th>Account</th>${MONTHS.map(m=>`<th class="num">${m}</th>`).join('')}</tr>`;
+  let html = `<tr><th>Account</th>${MONTHS.map(m=>`<th class="num">${m}</th>`).join('')}<th class="num">Total</th></tr>`;
   accounts.forEach(gl=>{
     const monthly = Array(12).fill(0);
     rows.filter(r=>r.GLAccount===gl).forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) monthly[m-1]=Number(r.Amount||0); });
     const glEsc = gl.replace(/'/g,"\\'").replace(/"/g,'&quot;');
-    html += `<tr><td>${gl}</td>${monthly.map((v,i)=>`<td class="num"><input type="number" class="mono nextYearEditInput" data-gl="${glEsc}" data-m="${i+1}" value="${v}" style="width:80px; text-align:left; font-size:12px; padding:4px 6px;"></td>`).join('')}</tr>`;
+    const rowTotal = monthly.reduce((s,v)=>s+v,0);
+    html += `<tr><td>${gl}</td>${monthly.map((v,i)=>`<td class="num"><input type="number" class="mono nextYearEditInput" data-gl="${glEsc}" data-m="${i+1}" value="${v}" style="width:80px; text-align:left; font-size:12px; padding:4px 6px;"></td>`).join('')}<td class="num mono" style="font-weight:700;">${fmt(rowTotal)}</td></tr>`;
   });
   document.getElementById('nextYearEditTable').innerHTML = html;
   document.getElementById('nextYearEditTable').dataset.dept = dept;
