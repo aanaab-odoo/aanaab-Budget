@@ -181,6 +181,7 @@
   <div class="nav-item" data-page="variance"><span class="nav-icon">⇄</span> Variance Analysis</div>
   <div class="nav-item" data-page="income"><span class="nav-icon">Σ</span> Income Statement</div>
   <div class="nav-item" data-page="detail"><span class="nav-icon">▤</span> Department Detail</div>
+  <div class="nav-item" data-page="approvals"><span class="nav-icon">✅</span> Approve Budgets</div>
   <div class="nav-item" data-page="setup"><span class="nav-icon">⚙</span> Settings</div>
   <div class="nav-item" onclick="signOutToGate()"><span class="nav-icon">🔓</span> Switch Department</div>
   <div class="sidebar-foot">
@@ -266,7 +267,17 @@
         <button class="btn gold" style="margin-top:16px;" onclick="generateNextYearSuggestion()">Generate suggestion</button>
         <div id="nextYearSuggestionWrap" style="margin-top:20px; display:none;">
           <table id="nextYearTable"></table>
-          <button class="btn gold" style="margin-top:14px;" onclick="saveNextYearBudget()">Save as next year's budget</button>
+          <button class="btn gold" style="margin-top:14px;" onclick="generateItemLevelBreakdown()">Break down by account →</button>
+        </div>
+        <div id="itemLevelWrap" style="margin-top:24px; display:none;">
+          <div class="section-title" style="margin-top:0;">Item-level breakdown — edit any cell, then submit</div>
+          <p style="color:var(--muted); font-size:13px; margin:0 0 16px;">
+            Each account gets the same share of the new total it had of this year's budget, split across months
+            using that same account's own monthly pattern from this year. Edit anything you'd like to change.
+          </p>
+          <table id="itemLevelTable" style="font-size:12.5px;"></table>
+          <button class="btn gold" style="margin-top:14px;" onclick="submitItemLevelBudget()">Save & Submit for Finance Approval</button>
+          <div id="submitStatusMsg" style="margin-top:10px; font-size:13px; display:none;"></div>
         </div>
       </div>
     </div>
@@ -378,6 +389,18 @@
         <input id="detailSearch" placeholder="Filter by account name..." style="max-width:280px; margin-bottom:14px;">
         <table id="detailTable"></table>
       </div>
+    </div>
+
+    <!-- APPROVE BUDGETS (Finance only) -->
+    <div id="page-approvals" style="display:none;">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Approve Budgets</div>
+          <div class="page-sub">Next-year budgets submitted by departments, pending your approval</div>
+        </div>
+        <button class="btn ghost" onclick="loadPendingApprovals()">↻ Refresh</button>
+      </div>
+      <div id="approvalsList"></div>
     </div>
 
     <!-- SETTINGS -->
@@ -627,7 +650,7 @@ async function checkExistingNextYearBudget(dept){
   document.getElementById('tabNextBtn').style.display='none';
   try{
     const data = await apiGet('year='+nextYear);
-    const rows = (data.budget||[]).filter(r=>r.Dept===dept && r.GLAccount==='Department Total (Forecast)');
+    const rows = (data.budget||[]).filter(r=>r.Dept===dept);
     if(rows.length){
       document.getElementById('tabNextBtn').style.display='inline-block';
       renderNextYearEditTable(dept, nextYear, rows);
@@ -765,31 +788,88 @@ function renderNextYearSuggestionTable(){
   document.getElementById('nextYearTable').innerHTML = html;
 }
 
-async function saveNextYearBudget(){
+// ---------- Item-level breakdown (per-account, submitted for Finance approval) ----------
+let itemLevelBreakdown = null;
+
+function generateItemLevelBreakdown(){
   if(!nextYearSuggestion){ toast('Generate a suggestion first'); return; }
+  const dept = nextYearSuggestion.dept;
+  const nextTotal = nextYearSuggestion.total;
   const nextYear = STATE.year + 1;
-  const rows = nextYearSuggestion.monthly.map((amt,i)=>({
-    year: nextYear, dept: nextYearSuggestion.dept, glAccount: 'Department Total (Forecast)',
-    accountType: 'Opex', month: i+1, amount: amt
-  }));
-  toast('Saving...');
-  const res = await apiPost({action:'saveBudget', rows});
+  const b = STATE.budget.filter(r=>r.Dept===dept);
+  const deptTotal = b.reduce((s,r)=>s+Number(r.Amount||0),0);
+
+  const accounts = [...new Set(b.map(r=>r.GLAccount))].sort();
+  const rows = {}; // gl -> {type, monthly[12]}
+  accounts.forEach(gl=>{
+    const acctRows = b.filter(r=>r.GLAccount===gl);
+    const type = acctRows[0].AccountType || 'Opex';
+    const acctTotal = acctRows.reduce((s,r)=>s+Number(r.Amount||0),0);
+    const share = deptTotal>0 ? acctTotal/deptTotal : 0;
+    const nextAcctTotal = nextTotal * share;
+    const monthTotals = Array(12).fill(0);
+    acctRows.forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) monthTotals[m-1]+=Number(r.Amount||0); });
+    const shape = acctTotal>0 ? monthTotals.map(v=>v/acctTotal) : Array(12).fill(1/12);
+    rows[gl] = { type, monthly: shape.map(p=>Math.round(nextAcctTotal*p*100)/100) };
+  });
+
+  itemLevelBreakdown = { dept, year: nextYear, rows };
+  renderItemLevelTable();
+  document.getElementById('itemLevelWrap').style.display='block';
+  document.getElementById('submitStatusMsg').style.display='none';
+}
+
+function renderItemLevelTable(){
+  if(!itemLevelBreakdown) return;
+  const { dept, rows } = itemLevelBreakdown;
+  const header = ['Line'].concat(MONTHS);
+  let html = `<tr>${header.map(h=>`<th${h!=='Line'?' class="num"':''}>${h}</th>`).join('')}</tr>`;
+  html += `<tr style="font-weight:800; background:var(--grape-soft);"><td colspan="${header.length}">${dept}</td></tr>`;
+
+  const totals = Array(12).fill(0);
+  Object.keys(rows).sort().forEach(gl=>{
+    const glEsc = gl.replace(/'/g,"\\'").replace(/"/g,'&quot;');
+    html += `<tr><td style="padding-left:16px;">${gl}</td>`;
+    rows[gl].monthly.forEach((v,i)=>{
+      totals[i]+=v;
+      html += `<td class="num"><input type="number" class="mono itemLevelInput" data-gl="${glEsc}" data-type="${rows[gl].type}" data-month="${i+1}" value="${v}" style="width:90px; text-align:left; padding:4px 6px; font-size:12px;"></td>`;
+    });
+    html += `</tr>`;
+  });
+  html += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>TOTAL — ${dept}</td>${totals.map(v=>`<td class="num mono">${fmt(v)}</td>`).join('')}</tr>`;
+  document.getElementById('itemLevelTable').innerHTML = html;
+}
+
+async function submitItemLevelBudget(){
+  if(!itemLevelBreakdown){ toast('Generate the breakdown first'); return; }
+  const rows = [];
+  document.querySelectorAll('.itemLevelInput').forEach(inp=>{
+    rows.push({ glAccount: inp.dataset.gl, accountType: inp.dataset.type, month: Number(inp.dataset.month), amount: Number(inp.value)||0 });
+  });
+  toast('Submitting for approval...');
+  const res = await apiPost({ action:'submitBudgetForApproval', year: itemLevelBreakdown.year, dept: itemLevelBreakdown.dept, rows });
+  const statusEl = document.getElementById('submitStatusMsg');
   if(res.ok){
-    toast(`Saved ${nextYear} budget for ${nextYearSuggestion.dept}`);
-    document.getElementById('tabNextBtn').style.display='inline-block';
-    const apiRows = nextYearSuggestion.monthly.map((amt,i)=>({Month:i+1, Amount:amt, Dept:nextYearSuggestion.dept, GLAccount:'Department Total (Forecast)'}));
-    renderNextYearEditTable(nextYearSuggestion.dept, nextYear, apiRows);
-    switchDeptTab('next');
+    statusEl.style.color = 'var(--good)';
+    statusEl.textContent = `✅ Submitted ${itemLevelBreakdown.year} budget for ${itemLevelBreakdown.dept} — pending Finance approval.`;
+    statusEl.style.display='block';
+    toast('Submitted for Finance approval');
+  } else {
+    statusEl.style.color = 'var(--bad)';
+    statusEl.textContent = 'Error: ' + res.error;
+    statusEl.style.display='block';
+    toast('Submit failed');
   }
-  else toast('Error: '+res.error);
 }
 
 function renderNextYearEditTable(dept, year, rows){
-  const monthly = Array(12).fill(0);
-  rows.forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) monthly[m-1] = Number(r.Amount||0); });
-  let html = `<tr><th>Month</th><th class="num">Budget ${year}</th></tr>`;
-  MONTHS.forEach((m,i)=>{
-    html += `<tr><td>${m}</td><td class="num"><input type="number" class="mono nextYearEditInput" data-m="${i+1}" value="${monthly[i]}" style="text-align:left;"></td></tr>`;
+  const accounts = [...new Set(rows.map(r=>r.GLAccount))].sort();
+  let html = `<tr><th>Account</th>${MONTHS.map(m=>`<th class="num">${m}</th>`).join('')}</tr>`;
+  accounts.forEach(gl=>{
+    const monthly = Array(12).fill(0);
+    rows.filter(r=>r.GLAccount===gl).forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) monthly[m-1]=Number(r.Amount||0); });
+    const glEsc = gl.replace(/'/g,"\\'").replace(/"/g,'&quot;');
+    html += `<tr><td>${gl}</td>${monthly.map((v,i)=>`<td class="num"><input type="number" class="mono nextYearEditInput" data-gl="${glEsc}" data-m="${i+1}" value="${v}" style="width:80px; text-align:left; font-size:12px; padding:4px 6px;"></td>`).join('')}</tr>`;
   });
   document.getElementById('nextYearEditTable').innerHTML = html;
   document.getElementById('nextYearEditTable').dataset.dept = dept;
@@ -801,11 +881,63 @@ async function updateNextYearBudget(){
   const dept = tableEl.dataset.dept, year = Number(tableEl.dataset.year);
   const rows = [];
   document.querySelectorAll('.nextYearEditInput').forEach(inp=>{
-    rows.push({ year, dept, glAccount:'Department Total (Forecast)', accountType:'Opex', month:Number(inp.dataset.m), amount:Number(inp.value)||0 });
+    rows.push({ year, dept, glAccount:inp.dataset.gl, accountType:'Opex', month:Number(inp.dataset.m), amount:Number(inp.value)||0 });
   });
   toast('Saving...');
   const res = await apiPost({action:'saveBudget', rows});
   if(res.ok) toast(`Updated ${year} budget for ${dept}`);
+  else toast('Error: '+res.error);
+}
+
+// ---------- Finance: approve/reject submitted budgets ----------
+async function loadPendingApprovals(){
+  const wrap = document.getElementById('approvalsList');
+  wrap.innerHTML = `<div class="loader"><div class="spin"></div> Loading pending submissions…</div>`;
+  try{
+    const data = await apiGet('action=pendingApprovals');
+    const pending = data.pending || [];
+    const groups = {}; // "dept|year" -> {dept, year, total, submittedAt, rows}
+    pending.forEach(r=>{
+      const key = r.Dept+'|'+r.Year;
+      if(!groups[key]) groups[key] = { dept:r.Dept, year:r.Year, total:0, submittedAt:r.SubmittedAt, rows:[] };
+      groups[key].total += Number(r.Amount||0);
+      groups[key].rows.push(r);
+    });
+    const keys = Object.keys(groups);
+    if(keys.length===0){ wrap.innerHTML = `<div class="card">${emptyState('No pending submissions')}</div>`; return; }
+
+    wrap.innerHTML = keys.map(key=>{
+      const g = groups[key];
+      const when = g.submittedAt ? new Date(g.submittedAt).toLocaleString() : '';
+      return `<div class="card" style="margin-bottom:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-weight:800; font-size:16px;">${g.dept} — ${g.year}</div>
+            <div style="color:var(--muted); font-size:12.5px;">Submitted ${when} • Total: <span class="mono">${fmt(g.total)}</span></div>
+          </div>
+          <div style="display:flex; gap:10px;">
+            <button class="btn gold" onclick="approveBudgetSubmission('${g.dept.replace(/'/g,"\\'")}', ${g.year})">✅ Approve</button>
+            <button class="btn ghost" onclick="rejectBudgetSubmission('${g.dept.replace(/'/g,"\\'")}', ${g.year})">✕ Reject</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }catch(e){
+    wrap.innerHTML = `<div class="card">${emptyState('Could not load pending submissions')}</div>`;
+  }
+}
+
+async function approveBudgetSubmission(dept, year){
+  toast('Approving...');
+  const res = await apiPost({action:'approveBudget', dept, year});
+  if(res.ok){ toast(`Approved ${year} budget for ${dept}`); loadPendingApprovals(); }
+  else toast('Error: '+res.error);
+}
+async function rejectBudgetSubmission(dept, year){
+  if(!confirm(`Reject the ${year} submission from ${dept}? This can't be undone.`)) return;
+  toast('Rejecting...');
+  const res = await apiPost({action:'rejectBudget', dept, year});
+  if(res.ok){ toast(`Rejected ${year} submission from ${dept}`); loadPendingApprovals(); }
   else toast('Error: '+res.error);
 }
 
@@ -836,13 +968,14 @@ function onYearChange(){ loadYear(document.getElementById('yearSelect').value); 
 
 function navTo(page){
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active', el.dataset.page===page));
-  ['dashboard','builder','variance','income','detail','setup'].forEach(p=>{
+  ['dashboard','builder','variance','income','detail','approvals','setup'].forEach(p=>{
     document.getElementById('page-'+p).style.display = (p===page)?'block':'none';
   });
   if(page==='builder') renderBuilderTable();
   if(page==='variance') renderVarianceTable();
   if(page==='income') renderIncomeStatement();
   if(page==='detail') renderDetailTable();
+  if(page==='approvals') loadPendingApprovals();
 }
 
 // ---------- Income Statement ----------
