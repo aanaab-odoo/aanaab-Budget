@@ -239,6 +239,11 @@
         <table id="deptCompareTable"></table>
       </div>
 
+      <div class="section-title">Budget Detail — every account, every month</div>
+      <div class="card">
+        <table id="deptBudgetDetailTable" style="font-size:12.5px;"></table>
+      </div>
+
       <div class="section-title">Create Budget for Next Year</div>
       <div class="card">
         <p style="color:var(--muted); font-size:13px; margin:0 0 16px;">
@@ -736,8 +741,29 @@ function renderDeptView(dept){
 
   document.getElementById('deptCompareTable').innerHTML = html || `<tr><td>${emptyState('No data')}</td></tr>`;
   document.getElementById('nextYearSuggestionWrap').style.display='none';
+  document.getElementById('itemLevelWrap').style.display='none';
   document.getElementById('nextYearPct').value='';
   document.getElementById('nextYearFixed').value='';
+
+  renderDeptBudgetDetailTable(dept, b, glSet, monthlyOf);
+}
+
+// Full, always-expanded Budget detail: every account, every month, exactly like the
+// item-level next-year breakdown table — but read-only and for the CURRENT year's budget.
+function renderDeptBudgetDetailTable(dept, budgetRows, glSet, monthlyOf){
+  const header = ['Line'].concat(MONTHS);
+  let html = `<tr>${header.map(h=>`<th${h!=='Line'?' class="num"':''}>${h}</th>`).join('')}</tr>`;
+  html += `<tr style="font-weight:800; background:var(--grape-soft);"><td colspan="${header.length}">${dept}</td></tr>`;
+
+  const totals = Array(12).fill(0);
+  const glsWithBudget = glSet.filter(gl => budgetRows.some(r=>r.GLAccount===gl));
+  glsWithBudget.forEach(gl=>{
+    const bMonths = monthlyOf(budgetRows, gl);
+    html += `<tr><td style="padding-left:16px;">${gl}</td>${bMonths.map((v,i)=>{ totals[i]+=v; return `<td class="num mono">${fmt(v)}</td>`; }).join('')}</tr>`;
+  });
+  html += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>TOTAL — ${dept}</td>${totals.map(v=>`<td class="num mono">${fmt(v)}</td>`).join('')}</tr>`;
+
+  document.getElementById('deptBudgetDetailTable').innerHTML = glsWithBudget.length ? html : `<tr><td>${emptyState('No budget data')}</td></tr>`;
 }
 
 // ---------- Next-year budget suggestion ----------
@@ -848,13 +874,11 @@ async function submitItemLevelBudget(){
   });
   toast('Submitting for approval...');
   const res = await apiPost({ action:'submitBudgetForApproval', year: itemLevelBreakdown.year, dept: itemLevelBreakdown.dept, rows });
-  const statusEl = document.getElementById('submitStatusMsg');
   if(res.ok){
-    statusEl.style.color = 'var(--good)';
-    statusEl.textContent = `✅ Submitted ${itemLevelBreakdown.year} budget for ${itemLevelBreakdown.dept} — pending Finance approval.`;
-    statusEl.style.display='block';
-    toast('Submitted for Finance approval');
+    toast(`✅ Submitted ${itemLevelBreakdown.year} budget for ${itemLevelBreakdown.dept} — pending Finance approval.`);
+    setTimeout(()=>{ STATE.unlockedDept = null; showDeptGate(); }, 1400);
   } else {
+    const statusEl = document.getElementById('submitStatusMsg');
     statusEl.style.color = 'var(--bad)';
     statusEl.textContent = 'Error: ' + res.error;
     statusEl.style.display='block';
