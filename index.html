@@ -919,6 +919,9 @@ async function updateNextYearBudget(){
 }
 
 // ---------- Finance: approve/reject submitted budgets ----------
+let pendingGroupsCache = {};
+let approvalExpanded = {};
+
 async function loadPendingApprovals(){
   const wrap = document.getElementById('approvalsList');
   wrap.innerHTML = `<div class="loader"><div class="spin"></div> Loading pending submissions…</div>`;
@@ -932,28 +935,63 @@ async function loadPendingApprovals(){
       groups[key].total += Number(r.Amount||0);
       groups[key].rows.push(r);
     });
-    const keys = Object.keys(groups);
-    if(keys.length===0){ wrap.innerHTML = `<div class="card">${emptyState('No pending submissions')}</div>`; return; }
-
-    wrap.innerHTML = keys.map(key=>{
-      const g = groups[key];
-      const when = g.submittedAt ? new Date(g.submittedAt).toLocaleString() : '';
-      return `<div class="card" style="margin-bottom:14px;">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div>
-            <div style="font-weight:800; font-size:16px;">${g.dept} — ${g.year}</div>
-            <div style="color:var(--muted); font-size:12.5px;">Submitted ${when} • Total: <span class="mono">${fmt(g.total)}</span></div>
-          </div>
-          <div style="display:flex; gap:10px;">
-            <button class="btn gold" onclick="approveBudgetSubmission('${g.dept.replace(/'/g,"\\'")}', ${g.year})">✅ Approve</button>
-            <button class="btn ghost" onclick="rejectBudgetSubmission('${g.dept.replace(/'/g,"\\'")}', ${g.year})">✕ Reject</button>
-          </div>
-        </div>
-      </div>`;
-    }).join('');
+    pendingGroupsCache = groups;
+    renderApprovalsList();
   }catch(e){
     wrap.innerHTML = `<div class="card">${emptyState('Could not load pending submissions')}</div>`;
   }
+}
+
+function renderApprovalsList(){
+  const wrap = document.getElementById('approvalsList');
+  const keys = Object.keys(pendingGroupsCache);
+  if(keys.length===0){ wrap.innerHTML = `<div class="card">${emptyState('No pending submissions')}</div>`; return; }
+
+  wrap.innerHTML = keys.map(key=>{
+    const g = pendingGroupsCache[key];
+    const when = g.submittedAt ? new Date(g.submittedAt).toLocaleString() : '';
+    const isOpen = !!approvalExpanded[key];
+    const keyEsc = key.replace(/'/g,"\\'");
+    let detailHtml = '';
+    if(isOpen){
+      const byAccount = {}; // gl -> monthly[12]
+      g.rows.forEach(r=>{
+        const gl = r.GLAccount;
+        if(!byAccount[gl]) byAccount[gl] = Array(12).fill(0);
+        const m = Number(r.Month);
+        if(m>=1 && m<=12) byAccount[gl][m-1] += Number(r.Amount||0);
+      });
+      const header = ['Line'].concat(MONTHS).concat(['Total']);
+      let tableHtml = `<tr>${header.map(h=>`<th${h!=='Line'?' class="num"':''}>${h}</th>`).join('')}</tr>`;
+      const totals = Array(12).fill(0);
+      Object.keys(byAccount).sort().forEach(gl=>{
+        const monthly = byAccount[gl];
+        const rowTotal = monthly.reduce((s,v)=>s+v,0);
+        tableHtml += `<tr><td style="padding-left:12px; font-size:12.5px;">${gl}</td>${monthly.map((v,i)=>{ totals[i]+=v; return `<td class="num mono" style="font-size:12px;">${fmt(v)}</td>`; }).join('')}<td class="num mono" style="font-size:12px; font-weight:700;">${fmt(rowTotal)}</td></tr>`;
+      });
+      const grandTotal = totals.reduce((s,v)=>s+v,0);
+      tableHtml += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>TOTAL</td>${totals.map(v=>`<td class="num mono">${fmt(v)}</td>`).join('')}<td class="num mono">${fmt(grandTotal)}</td></tr>`;
+      detailHtml = `<div style="margin-top:16px; overflow-x:auto; background:var(--paper); border:1px solid var(--line); border-radius:10px; padding:4px;"><table style="min-width:1400px;">${tableHtml}</table></div>`;
+    }
+    return `<div class="card" style="margin-bottom:14px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleApprovalDetail('${keyEsc}')">
+        <div>
+          <div style="font-weight:800; font-size:16px;">${isOpen?'▾':'▸'} ${g.dept} — ${g.year}</div>
+          <div style="color:var(--muted); font-size:12.5px;">Submitted ${when} • Total: <span class="mono">${fmt(g.total)}</span></div>
+        </div>
+        <div style="display:flex; gap:10px;" onclick="event.stopPropagation()">
+          <button class="btn gold" onclick="approveBudgetSubmission('${g.dept.replace(/'/g,"\\'")}', ${g.year})">✅ Approve</button>
+          <button class="btn ghost" onclick="rejectBudgetSubmission('${g.dept.replace(/'/g,"\\'")}', ${g.year})">✕ Reject</button>
+        </div>
+      </div>
+      ${detailHtml}
+    </div>`;
+  }).join('');
+}
+
+function toggleApprovalDetail(key){
+  approvalExpanded[key] = !approvalExpanded[key];
+  renderApprovalsList();
 }
 
 async function approveBudgetSubmission(dept, year){
