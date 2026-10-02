@@ -3,6 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Lets the Google Sign-In popup/FedCM flow post its result back to this page.
+     Without this, some browsers' default cross-origin isolation silently blocks
+     Google's response and the sign-in button appears to do nothing. -->
+<meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin-allow-popups">
 <title>Budget Tool | Aanaab</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
@@ -756,7 +760,7 @@ function initGoogleSignIn(){
   }
   document.getElementById('googleSignInSection').style.display='block';
   document.getElementById('googleSignedInBar').style.display='none';
-  google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: onGoogleCredential });
+  google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: onGoogleCredential, use_fedcm_for_prompt: true, use_fedcm_for_button: true });
   google.accounts.id.renderButton(document.getElementById('googleSignInBtn'), { theme:'outline', size:'large', shape:'pill', text:'signin_with' });
 }
 
