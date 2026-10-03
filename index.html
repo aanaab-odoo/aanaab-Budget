@@ -707,6 +707,18 @@ function getDisplayDepts(){
   return [...set].sort();
 }
 
+// Dept_Access entries are typed by hand (e.g. "Marketing") and don't always match
+// the exact department string in Budget_Data/Actual_Data (often "Marketing dep.",
+// as it comes straight from Odoo's analytic account name). This normalizes both
+// sides (case, spacing, a trailing "dep.") so they line up, and resolves a
+// Dept_Access name to the REAL department string the data actually uses.
+function normDeptKey_(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'').replace(/dep$/,''); }
+function resolveRealDept_(typedName){
+  const key = normDeptKey_(typedName);
+  const real = getDisplayDepts().find(d => normDeptKey_(d) === key);
+  return real || typedName;
+}
+
 async function boot(){
   document.getElementById('page-setup-first').style.display='none';
   setConn(false);
@@ -800,14 +812,16 @@ async function onGoogleCredential(response){
 // Shared by a fresh sign-in and a restored session: decides which department to
 // open (or asks, if the email is linked to more than one) from the verified result.
 function completeGoogleLogin(info, freshSignIn){
-  const displayDepts = getDisplayDepts();
-  const matched = (info.depts||[]).filter(d => info.isFinance || displayDepts.includes(d) || /finance/i.test(d));
+  // Trust whatever is listed in Dept_Access for this email — isFinance (checked
+  // server-side with the same "contains finance" rule) grants full access
+  // regardless of which other depts are also listed for the same address.
+  const depts = info.depts || [];
   if(info.isFinance){
-    unlockDept(matched.find(d=>/finance/i.test(d)) || 'Finance');
-  } else if(matched.length === 1){
-    unlockDept(matched[0]);
-  } else if(matched.length > 1){
-    showDeptPickModal(matched);
+    unlockDept(depts.find(d=>/finance/i.test(d)) || 'Finance');
+  } else if(depts.length === 1){
+    unlockDept(resolveRealDept_(depts[0]));
+  } else if(depts.length > 1){
+    showDeptPickModal(depts);
   } else {
     document.getElementById('googleSignedInBar').style.display='none';
     document.getElementById('googleSignInStatus').textContent =
@@ -823,7 +837,7 @@ function showDeptPickModal(depts){
 }
 function chooseDeptFromGoogle(dept){
   document.getElementById('deptPickModalBg').classList.remove('open');
-  unlockDept(dept);
+  unlockDept(/finance/i.test(dept) ? dept : resolveRealDept_(dept));
 }
 
 function googleSignOut(){
@@ -929,9 +943,7 @@ function signOutToGate(){
       document.getElementById('googleSignInSection').style.display='none';
       document.getElementById('googleSignedInBar').style.display='flex';
       document.getElementById('googleSignedInEmail').textContent = sess.email;
-      const displayDepts = getDisplayDepts();
-      const matched = (sess.depts||[]).filter(d => sess.isFinance || displayDepts.includes(d) || /finance/i.test(d));
-      if(matched.length > 1) showDeptPickModal(matched);
+      if((sess.depts||[]).length > 1) showDeptPickModal(sess.depts);
     }
   }catch(e){}
 }
