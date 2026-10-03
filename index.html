@@ -188,6 +188,7 @@
   <div class="nav-item" data-page="detail"><span class="nav-icon">▤</span> Department Detail</div>
   <div class="nav-item" data-page="approvals"><span class="nav-icon">✅</span> Approve Budgets</div>
   <div class="nav-item" data-page="setup"><span class="nav-icon">⚙</span> Settings</div>
+  <a class="nav-item" href="Budget_Tool_User_Guide.html" target="_blank" rel="noopener" style="display:block; text-decoration:none;"><span class="nav-icon">📘</span> User Guide</a>
   <div class="nav-item" onclick="signOutToGate()"><span class="nav-icon">🔓</span> Switch Department</div>
   <div class="sidebar-foot">
     <button class="btn ghost" id="refreshOdooBtnSidebar" style="width:100%; margin-bottom:10px;" onclick="refreshActualsFromOdoo(this)">🔄 Refresh Actuals from Odoo</button>
@@ -229,6 +230,7 @@
     <div id="googleUnavailableNotice" style="display:none; color:var(--muted); font-size:13px; margin-top:10px;">
       Google Sign-In isn't configured yet — open the Google Sheet and use "🔑 Set Google OAuth Client ID" from the Budget Tool menu.
     </div>
+    <a href="Budget_Tool_User_Guide.html" target="_blank" rel="noopener" style="display:inline-block; margin-top:22px; font-size:13px; color:var(--grape); text-decoration:none;">📘 User Guide</a>
   </div>
 
   <!-- Google account maps to more than one department — let the person pick which one -->
@@ -251,6 +253,7 @@
         <select class="year-select" id="deptViewYear" onchange="onDeptViewYearChange()"></select>
         <button class="btn ghost" id="deptInitiativesBtn" onclick="toggleDeptInitiativesBanner()" style="display:none;">🎯 My Initiatives</button>
         <button class="btn ghost" id="refreshOdooBtnDept" onclick="refreshActualsFromOdoo(this)">🔄 Refresh Actuals</button>
+        <a class="btn ghost" href="Budget_Tool_User_Guide.html" target="_blank" rel="noopener" style="text-decoration:none; display:inline-flex; align-items:center;">📘 User Guide</a>
         <button class="btn ghost" onclick="signOutToGate()">🔓 Switch Department</button>
       </div>
     </div>
@@ -683,7 +686,7 @@ window.addEventListener('DOMContentLoaded', async ()=>{
   populateSelect('lineDept', DEPTS);
   document.getElementById('lineMonths').innerHTML = MONTHS.map((m,i)=>
     `<div><span>${m}</span><input type="number" class="mono lineMonthInput" data-m="${i+1}" placeholder="0"></div>`).join('');
-  document.querySelectorAll('.nav-item').forEach(el=>el.addEventListener('click',()=>navTo(el.dataset.page)));
+  document.querySelectorAll('.nav-item[data-page]').forEach(el=>el.addEventListener('click',()=>navTo(el.dataset.page)));
 
   // A manual "Save and reconnect (this browser only)" always wins if someone set one;
   // otherwise pick up the link everyone shares, published once from Settings.
