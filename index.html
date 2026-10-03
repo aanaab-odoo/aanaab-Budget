@@ -1136,7 +1136,21 @@ function renderNextYearSuggestionTable(){
 // ---------- Item-level breakdown (per-account, submitted for Finance approval) ----------
 let itemLevelBreakdown = null;
 
-function generateItemLevelBreakdown(){
+// Renders one GL account's initiative checkboxes. `available` is the list of
+// initiative names set up for this department; `selected` is whichever of
+// those are already tagged onto this account (many-to-many: one account can
+// serve several initiatives, and one initiative can be served by several
+// accounts — the checkbox just toggles the link for THIS account).
+function initiativeCheckboxesHtml(glEsc, selected, available, cssClass){
+  if(!available || !available.length) return `<span style="color:var(--muted); font-size:11px;">No initiatives set up for this department yet.</span>`;
+  return available.map(n=>{
+    const nEsc = n.replace(/"/g,'&quot;');
+    const checked = selected.indexOf(n)!==-1 ? 'checked' : '';
+    return `<label style="display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:500; margin:0 10px 4px 0;"><input type="checkbox" class="${cssClass}" data-gl="${glEsc}" value="${nEsc}" ${checked}> ${n}</label>`;
+  }).join('');
+}
+
+async function generateItemLevelBreakdown(){
   if(!nextYearSuggestion){ toast('Generate a suggestion first'); return; }
   const dept = nextYearSuggestion.dept;
   const nextTotal = nextYearSuggestion.total;
@@ -1144,8 +1158,16 @@ function generateItemLevelBreakdown(){
   const b = STATE.budget.filter(r=>r.Dept===dept);
   const deptTotal = b.reduce((s,r)=>s+Number(r.Amount||0),0);
 
+  // Carry over this year's initiative tags for the same account as a starting
+  // point — the manager can still add/remove before submitting.
+  let existingLinks = {};
+  try{
+    const linksRes = await apiGet('action=initiativeLinks&year='+STATE.year+'&dept='+encodeURIComponent(dept));
+    existingLinks = linksRes.links || {};
+  }catch(e){ existingLinks = {}; }
+
   const accounts = [...new Set(b.map(r=>r.GLAccount))].sort();
-  const rows = {}; // gl -> {type, monthly[12]}
+  const rows = {}; // gl -> {type, monthly[12], initiatives[]}
   accounts.forEach(gl=>{
     const acctRows = b.filter(r=>r.GLAccount===gl);
     const type = acctRows[0].AccountType || 'Opex';
@@ -1155,7 +1177,7 @@ function generateItemLevelBreakdown(){
     const monthTotals = Array(12).fill(0);
     acctRows.forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) monthTotals[m-1]+=Number(r.Amount||0); });
     const shape = acctTotal>0 ? monthTotals.map(v=>v/acctTotal) : Array(12).fill(1/12);
-    rows[gl] = { type, monthly: shape.map(p=>Math.round(nextAcctTotal*p*100)/100) };
+    rows[gl] = { type, monthly: shape.map(p=>Math.round(nextAcctTotal*p*100)/100), initiatives: existingLinks[gl] || [] };
   });
 
   itemLevelBreakdown = { dept, year: nextYear, rows };
@@ -1181,6 +1203,7 @@ function renderItemLevelTable(){
       html += `<td class="num"><input type="number" class="mono itemLevelInput" data-gl="${glEsc}" data-type="${rows[gl].type}" data-month="${i+1}" value="${v}" style="width:90px; text-align:left; padding:4px 6px; font-size:12px;"></td>`;
     });
     html += `<td class="num mono" style="font-weight:700;">${fmt(rowTotal)}</td></tr>`;
+    html += `<tr><td colspan="${header.length}" style="padding:2px 6px 10px 16px; border-bottom:1px solid var(--line);"><span style="font-size:11px; color:var(--muted); margin-right:8px;">Serves initiative(s):</span>${initiativeCheckboxesHtml(glEsc, rows[gl].initiatives, STATE.currentInitiatives, 'itemLevelInitCheck')}</td></tr>`;
   });
   const grandTotal = totals.reduce((s,v)=>s+v,0);
   html += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>TOTAL — ${dept}</td>${totals.map(v=>`<td class="num mono">${fmt(v)}</td>`).join('')}<td class="num mono">${fmt(grandTotal)}</td></tr>`;
@@ -1193,8 +1216,14 @@ async function submitItemLevelBudget(){
   document.querySelectorAll('.itemLevelInput').forEach(inp=>{
     rows.push({ glAccount: inp.dataset.gl, accountType: inp.dataset.type, month: Number(inp.dataset.month), amount: Number(inp.value)||0 });
   });
+  const initiativesByGl = {};
+  document.querySelectorAll('.itemLevelInitCheck:checked').forEach(cb=>{
+    const gl = cb.dataset.gl;
+    if(!initiativesByGl[gl]) initiativesByGl[gl] = [];
+    initiativesByGl[gl].push(cb.value);
+  });
   toast('Submitting for approval...');
-  const res = await apiPost({ action:'submitBudgetForApproval', year: itemLevelBreakdown.year, dept: itemLevelBreakdown.dept, rows });
+  const res = await apiPost({ action:'submitBudgetForApproval', year: itemLevelBreakdown.year, dept: itemLevelBreakdown.dept, rows, initiativesByGl });
   if(res.ok){
     toast(`✅ Submitted ${itemLevelBreakdown.year} budget for ${itemLevelBreakdown.dept} — pending Finance approval.`);
     setTimeout(()=>{ STATE.unlockedDept = null; showDeptGate(); }, 1400);
@@ -1355,7 +1384,7 @@ function navTo(page){
   ['dashboard','builder','variance','income','detail','approvals','setup'].forEach(p=>{
     document.getElementById('page-'+p).style.display = (p===page)?'block':'none';
   });
-  if(page==='builder'){ builderExpand = { all:false, rows:{} }; switchBuilderTab('current'); renderBuilderDeptView(); checkBuilderExistingNextYearBudget(); }
+  if(page==='builder'){ builderExpand = { all:false, rows:{} }; switchBuilderTab('current'); renderBuilderDeptView(); checkBuilderExistingNextYearBudget(); loadBuilderInitiatives(document.getElementById('builderDept').value); }
   if(page==='variance') renderVarianceTable();
   if(page==='income') renderIncomeStatement();
   if(page==='detail') renderDetailTable();
@@ -1643,8 +1672,16 @@ function addNewYear(){
 // unlocked view, with a department picker on top instead of a password gate ----------
 let builderExpand = { all:false, rows:{} };
 
-function onBuilderDeptChange(){ builderExpand = { all:false, rows:{} }; renderBuilderDeptView(); checkBuilderExistingNextYearBudget(); }
-function onBuilderYearChange(){ loadYear(Number(document.getElementById('builderYear').value)).then(()=>{ populateSelect('builderDept', getDisplayDepts()); renderBuilderDeptView(); checkBuilderExistingNextYearBudget(); }); }
+let builderInitiatives = [];
+function loadBuilderInitiatives(dept){
+  builderInitiatives = [];
+  if(!dept) return;
+  apiGet('action=initiatives&dept='+encodeURIComponent(dept)).then(res=>{
+    builderInitiatives = (res.initiatives||[]).map(x=>x.initiative);
+  }).catch(e=>{ builderInitiatives = []; console.error(e); });
+}
+function onBuilderDeptChange(){ builderExpand = { all:false, rows:{} }; renderBuilderDeptView(); checkBuilderExistingNextYearBudget(); loadBuilderInitiatives(document.getElementById('builderDept').value); }
+function onBuilderYearChange(){ loadYear(Number(document.getElementById('builderYear').value)).then(()=>{ populateSelect('builderDept', getDisplayDepts()); renderBuilderDeptView(); checkBuilderExistingNextYearBudget(); loadBuilderInitiatives(document.getElementById('builderDept').value); }); }
 
 function switchBuilderTab(tab){
   document.getElementById('builderTabCurrent').style.display = tab==='current' ? 'block' : 'none';
@@ -1770,13 +1807,19 @@ function renderBuilderNextYearSuggestionTable(){
 
 let builderItemLevelBreakdown = null;
 
-function generateBuilderItemLevelBreakdown(){
+async function generateBuilderItemLevelBreakdown(){
   if(!builderNextYearSuggestion){ toast('Generate a suggestion first'); return; }
   const dept = builderNextYearSuggestion.dept;
   const nextTotal = builderNextYearSuggestion.total;
   const nextYear = STATE.year + 1;
   const b = STATE.budget.filter(r=>r.Dept===dept);
   const deptTotal = b.reduce((s,r)=>s+Number(r.Amount||0),0);
+
+  let existingLinks = {};
+  try{
+    const linksRes = await apiGet('action=initiativeLinks&year='+STATE.year+'&dept='+encodeURIComponent(dept));
+    existingLinks = linksRes.links || {};
+  }catch(e){ existingLinks = {}; }
 
   const accounts = [...new Set(b.map(r=>r.GLAccount))].sort();
   const rows = {};
@@ -1789,7 +1832,7 @@ function generateBuilderItemLevelBreakdown(){
     const monthTotals = Array(12).fill(0);
     acctRows.forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) monthTotals[m-1]+=Number(r.Amount||0); });
     const shape = acctTotal>0 ? monthTotals.map(v=>v/acctTotal) : Array(12).fill(1/12);
-    rows[gl] = { type, monthly: shape.map(p=>Math.round(nextAcctTotal*p*100)/100) };
+    rows[gl] = { type, monthly: shape.map(p=>Math.round(nextAcctTotal*p*100)/100), initiatives: existingLinks[gl] || [] };
   });
 
   builderItemLevelBreakdown = { dept, year: nextYear, rows };
@@ -1815,6 +1858,7 @@ function renderBuilderItemLevelTable(){
       html += `<td class="num"><input type="number" class="mono bItemLevelInput" data-gl="${glEsc}" data-type="${rows[gl].type}" data-month="${i+1}" value="${v}" style="width:90px; text-align:left; padding:4px 6px; font-size:12px;"></td>`;
     });
     html += `<td class="num mono" style="font-weight:700;">${fmt(rowTotal)}</td></tr>`;
+    html += `<tr><td colspan="${header.length}" style="padding:2px 6px 10px 16px; border-bottom:1px solid var(--line);"><span style="font-size:11px; color:var(--muted); margin-right:8px;">Serves initiative(s):</span>${initiativeCheckboxesHtml(glEsc, rows[gl].initiatives, builderInitiatives, 'bItemLevelInitCheck')}</td></tr>`;
   });
   const grandTotal = totals.reduce((s,v)=>s+v,0);
   html += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>TOTAL — ${dept}</td>${totals.map(v=>`<td class="num mono">${fmt(v)}</td>`).join('')}<td class="num mono">${fmt(grandTotal)}</td></tr>`;
@@ -1827,8 +1871,14 @@ async function submitBuilderItemLevelBudget(){
   document.querySelectorAll('.bItemLevelInput').forEach(inp=>{
     rows.push({ glAccount: inp.dataset.gl, accountType: inp.dataset.type, month: Number(inp.dataset.month), amount: Number(inp.value)||0 });
   });
+  const initiativesByGl = {};
+  document.querySelectorAll('.bItemLevelInitCheck:checked').forEach(cb=>{
+    const gl = cb.dataset.gl;
+    if(!initiativesByGl[gl]) initiativesByGl[gl] = [];
+    initiativesByGl[gl].push(cb.value);
+  });
   toast('Submitting for approval...');
-  const res = await apiPost({ action:'submitBudgetForApproval', year: builderItemLevelBreakdown.year, dept: builderItemLevelBreakdown.dept, rows });
+  const res = await apiPost({ action:'submitBudgetForApproval', year: builderItemLevelBreakdown.year, dept: builderItemLevelBreakdown.dept, rows, initiativesByGl });
   if(res.ok){
     toast(`✅ Submitted ${builderItemLevelBreakdown.year} budget for ${builderItemLevelBreakdown.dept}`);
     checkBuilderExistingNextYearBudget();
