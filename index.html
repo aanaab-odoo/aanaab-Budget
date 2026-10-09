@@ -775,8 +775,10 @@ async function apiPost(payload){
 // dashboard totals, thermometers, charts, variance analysis, and top-variance lists.
 const EXCLUDED_DEPTS = ['Expenses', 'Unassigned'];
 function isRealDept(d){ return !EXCLUDED_DEPTS.includes(d); }
-function realBudgetRows(){ return STATE.budget.filter(r=>isRealDept(r.Dept)); }
-function realActualRows(){ return STATE.actual.filter(r=>isRealDept(r.Dept)); }
+// Budget-vs-actual totals are EXPENSE accounts only — revenue accounts (codes starting
+// with 4) are never summed together with expenses (see isRevenueGL further down).
+function realBudgetRows(){ return STATE.budget.filter(r=>isRealDept(r.Dept) && !isRevenueGL(r.GLAccount)); }
+function realActualRows(){ return STATE.actual.filter(r=>isRealDept(r.Dept) && !isRevenueGL(r.GLAccount)); }
 
 // Real department names come from the data itself (Odoo analytic accounts), not a
 // fixed list — the fixed DEPTS above is only a fallback for picking a department
@@ -1062,72 +1064,126 @@ let deptExpand = { all:false, rows:{} };
 
 function toggleAllAccounts(){ deptExpand.all = !deptExpand.all; renderDeptView(STATE.unlockedDept); }
 function toggleAccountMonths(gl){ deptExpand.rows[gl] = !deptExpand.rows[gl]; renderDeptView(STATE.unlockedDept); }
+function toggleDeptRevenue(){ deptExpand.rev = (deptExpand.rev === false); renderDeptView(STATE.unlockedDept); }
+
+// ---------- Revenue vs expense separation ----------
+// Revenue accounts (codes starting with 4: 424xxx, 479xxx, 489xxx …) are NEVER added into
+// a department's budget total and never compared against department-linked actuals —
+// revenue isn't tagged to a department when it's booked, so it's shown in its own
+// section, with its ACTUAL taken as-is (company-wide, whatever is in Actual_Data for that
+// account) instead of being forced into a department.
+function glCode_(gl){ const m = String(gl||'').match(/^(\d+)/); return m ? m[1] : ''; }
+function isRevenueGL(gl){ return /^4/.test(glCode_(gl)); }
+
+// Builds the Budget / Actual / Variance table for one department.
+//  b = this department's budget rows, a = this department's actual rows
+//  expand = {all, rev, rows}; fnAll / fnRev / fnRow = names of the toggle handlers
+function buildCompareTableHtml_(b, a, expand, fnAll, fnRev, fnRow){
+  const sum = arr => arr.reduce((s,v)=>s+v,0);
+  const monthlyOf = (rows, gl) => { const arr=Array(12).fill(0); rows.filter(r=>r.GLAccount===gl).forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) arr[m-1]+=Number(r.Amount||0); }); return arr; };
+  const monthlyByCode = (rows, code) => { const arr=Array(12).fill(0); rows.filter(r=>glCode_(r.GLAccount)===code).forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) arr[m-1]+=Number(r.Amount||0); }); return arr; };
+
+  const expGls = [...new Set([...b.map(r=>r.GLAccount), ...a.map(r=>r.GLAccount)])].filter(gl=>!isRevenueGL(gl)).sort();
+  const revGls = [...new Set(b.map(r=>r.GLAccount).filter(isRevenueGL))].sort();
+
+  const rowBlock = (gl, bMonths, aMonths, isRev) => {
+    const bt = sum(bMonths), at = sum(aMonths);
+    const diff = isRev ? at-bt : bt-at;     // revenue: actual above budget is good; expense: budget left over is good
+    const diffM = mi => isRev ? aMonths[mi]-bMonths[mi] : bMonths[mi]-aMonths[mi];
+    const isOpen = !!expand.rows[gl];
+    const glEsc = gl.replace(/'/g,"\\'");
+    let h = `<tr style="cursor:pointer;" onclick="${fnRow}('${glEsc}')">
+      <td style="padding-left:20px;">${isOpen?'▾':'▸'} ${gl}</td><td class="num mono">${fmt(bt)}</td><td class="num mono">${fmt(at)}</td>
+      <td class="num mono" style="color:${diff<0?'var(--bad)':'var(--good)'}">${fmt(diff)}</td></tr>`;
+    if(isOpen){
+      MONTHS.forEach((m,mi)=>{
+        h += `<tr style="background:var(--paper);">
+          <td style="padding-left:44px; font-size:12.5px; color:var(--muted);">${m}</td>
+          <td class="num mono" style="font-size:12.5px;">${fmt(bMonths[mi])}</td>
+          <td class="num mono" style="font-size:12.5px;">${fmt(aMonths[mi])}</td>
+          <td class="num mono" style="font-size:12.5px; color:${diffM(mi)<0?'var(--bad)':'var(--good)'}">${fmt(diffM(mi))}</td></tr>`;
+      });
+    }
+    return { html:h, bt, at };
+  };
+
+  // ----- Expenses: the ONLY accounts that make up the department's total budget -----
+  let expB=0, expA=0, expRows='';
+  expGls.forEach(gl=>{
+    const r = rowBlock(gl, monthlyOf(b, gl), monthlyOf(a, gl), false);
+    expB += r.bt; expA += r.at; expRows += r.html;
+  });
+  // ----- Revenue: its own section; actual = company-wide, as-is, not tied to a department -----
+  let revB=0, revA=0, revRows='';
+  revGls.forEach(gl=>{
+    const code = glCode_(gl);
+    const r = rowBlock(gl, monthlyOf(b, gl), monthlyByCode(STATE.actual, code), true);
+    revB += r.bt; revA += r.at; revRows += r.html;
+  });
+
+  let html = `<tr><th>Account</th><th class="num">Budget</th><th class="num">Actual</th><th class="num">Variance</th></tr>`;
+  if(expGls.length){
+    html += `<tr style="font-weight:800; cursor:pointer;" onclick="${fnAll}()">
+      <td>${expand.all?'▾':'▸'} Total expenses (${expGls.length} accounts)</td><td class="num mono">${fmt(expB)}</td><td class="num mono">${fmt(expA)}</td>
+      <td class="num mono" style="color:${expB-expA<0?'var(--bad)':'var(--good)'}">${fmt(expB-expA)}</td></tr>`;
+    if(expand.all) html += expRows;
+  }
+  if(revGls.length){
+    const revOpen = expand.rev !== false;
+    html += `<tr style="font-weight:800; cursor:pointer; background:var(--grape-soft);" onclick="${fnRev}()">
+      <td>${revOpen?'▾':'▸'} Revenue (${revGls.length} accounts)
+        <div style="font-weight:500; font-size:11.5px; color:var(--muted);">Not part of the expense total above — actual is company-wide, as booked (revenue isn't tied to a department)</div></td>
+      <td class="num mono">${fmt(revB)}</td><td class="num mono">${fmt(revA)}</td>
+      <td class="num mono" style="color:${revA-revB<0?'var(--bad)':'var(--good)'}">${fmt(revA-revB)}</td></tr>`;
+    if(revOpen) html += revRows;
+  }
+  return (expGls.length || revGls.length) ? html : '';
+}
+
+// Budget detail (every account × every month, current year's budget, read-only):
+// Revenue and Expenses are listed and totalled SEPARATELY — the main TOTAL is expenses only.
+function buildBudgetDetailHtml_(dept, budgetRows){
+  const header = ['Line'].concat(MONTHS).concat(['Total']);
+  const monthlyOf = (rows, gl) => { const arr=Array(12).fill(0); rows.filter(r=>r.GLAccount===gl).forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) arr[m-1]+=Number(r.Amount||0); }); return arr; };
+  const gls = [...new Set(budgetRows.map(r=>r.GLAccount))].sort();
+  if(!gls.length) return '';
+  let html = `<tr>${header.map(h=>`<th${h!=='Line'?' class="num"':''}>${h}</th>`).join('')}</tr>`;
+  html += `<tr style="font-weight:800; background:var(--grape-soft);"><td colspan="${header.length}">${dept}</td></tr>`;
+
+  const section = (list, label, totalLabel, withDivider) => {
+    if(!list.length) return '';
+    const totals = Array(12).fill(0);
+    let h = `<tr><td colspan="${header.length}" style="font-weight:700; color:var(--muted); font-size:12px; letter-spacing:.04em; text-transform:uppercase; padding-top:12px;">${label}</td></tr>`;
+    list.forEach(gl=>{
+      const bMonths = monthlyOf(budgetRows, gl);
+      h += `<tr><td style="padding-left:16px;">${gl}</td>${bMonths.map((v,i)=>{ totals[i]+=v; return `<td class="num mono">${fmt(v)}</td>`; }).join('')}<td class="num mono" style="font-weight:700;">${fmt(bMonths.reduce((s,v)=>s+v,0))}</td></tr>`;
+    });
+    h += `<tr style="font-weight:800; ${withDivider?'border-top:2px solid var(--line);':''}"><td>${totalLabel} — ${dept}</td>${totals.map(v=>`<td class="num mono">${fmt(v)}</td>`).join('')}<td class="num mono">${fmt(totals.reduce((s,v)=>s+v,0))}</td></tr>`;
+    return h;
+  };
+  html += section(gls.filter(isRevenueGL), 'Revenue', 'TOTAL REVENUE', false);
+  html += section(gls.filter(gl=>!isRevenueGL(gl)), 'Expenses', 'TOTAL EXPENSES', true);
+  return html;
+}
 
 function renderDeptView(dept){
   document.getElementById('deptViewTitle').textContent = dept;
   const b = STATE.budget.filter(r=>r.Dept===dept);
   const a = STATE.actual.filter(r=>r.Dept===dept);
-  const glSet = [...new Set([...b.map(r=>r.GLAccount), ...a.map(r=>r.GLAccount)])].sort();
 
-  const monthlyOf = (rows, gl) => { const arr=Array(12).fill(0); rows.filter(r=>r.GLAccount===gl).forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) arr[m-1]+=Number(r.Amount||0); }); return arr; };
-  const sum = arr => arr.reduce((s,v)=>s+v,0);
-
-  let totalB=0, totalA=0;
-  let rowsHtml = '';
-
-  glSet.forEach(gl=>{
-    const bMonths = monthlyOf(b, gl), aMonths = monthlyOf(a, gl);
-    const bt = sum(bMonths), at = sum(aMonths);
-    totalB += bt; totalA += at;
-    const isOpen = !!deptExpand.rows[gl];
-    const glEsc = gl.replace(/'/g,"\\'");
-    rowsHtml += `<tr style="cursor:pointer;" onclick="toggleAccountMonths('${glEsc}')">
-      <td style="padding-left:20px;">${isOpen?'▾':'▸'} ${gl}</td><td class="num mono">${fmt(bt)}</td><td class="num mono">${fmt(at)}</td>
-      <td class="num mono" style="color:${bt-at<0?'var(--bad)':'var(--good)'}">${fmt(bt-at)}</td></tr>`;
-    if(isOpen){
-      MONTHS.forEach((m,mi)=>{
-        rowsHtml += `<tr style="background:var(--paper);">
-          <td style="padding-left:44px; font-size:12.5px; color:var(--muted);">${m}</td>
-          <td class="num mono" style="font-size:12.5px;">${fmt(bMonths[mi])}</td>
-          <td class="num mono" style="font-size:12.5px;">${fmt(aMonths[mi])}</td>
-          <td class="num mono" style="font-size:12.5px; color:${bMonths[mi]-aMonths[mi]<0?'var(--bad)':'var(--good)'}">${fmt(bMonths[mi]-aMonths[mi])}</td></tr>`;
-      });
-    }
-  });
-
-  let html = `<tr><th>Account</th><th class="num">Budget</th><th class="num">Actual</th><th class="num">Variance</th></tr>`;
-  html += `<tr style="font-weight:800; cursor:pointer;" onclick="toggleAllAccounts()">
-    <td>${deptExpand.all?'▾':'▸'} All accounts (${glSet.length})</td><td class="num mono">${fmt(totalB)}</td><td class="num mono">${fmt(totalA)}</td>
-    <td class="num mono" style="color:${totalB-totalA<0?'var(--bad)':'var(--good)'}">${fmt(totalB-totalA)}</td></tr>`;
-  if(deptExpand.all) html += rowsHtml;
-
+  const html = buildCompareTableHtml_(b, a, deptExpand, 'toggleAllAccounts', 'toggleDeptRevenue', 'toggleAccountMonths');
   document.getElementById('deptCompareTable').innerHTML = html || `<tr><td>${emptyState('No data')}</td></tr>`;
   document.getElementById('nextYearSuggestionWrap').style.display='none';
   document.getElementById('itemLevelWrap').style.display='none';
   document.getElementById('nextYearPct').value='';
   document.getElementById('nextYearFixed').value='';
 
-  renderDeptBudgetDetailTable(dept, b, glSet, monthlyOf);
+  renderDeptBudgetDetailTable(dept, b);
 }
 
-// Full, always-expanded Budget detail: every account, every month, exactly like the
-// item-level next-year breakdown table — but read-only and for the CURRENT year's budget.
-function renderDeptBudgetDetailTable(dept, budgetRows, glSet, monthlyOf){
-  const header = ['Line'].concat(MONTHS).concat(['Total']);
-  let html = `<tr>${header.map(h=>`<th${h!=='Line'?' class="num"':''}>${h}</th>`).join('')}</tr>`;
-  html += `<tr style="font-weight:800; background:var(--grape-soft);"><td colspan="${header.length}">${dept}</td></tr>`;
-
-  const totals = Array(12).fill(0);
-  const glsWithBudget = glSet.filter(gl => budgetRows.some(r=>r.GLAccount===gl));
-  glsWithBudget.forEach(gl=>{
-    const bMonths = monthlyOf(budgetRows, gl);
-    const rowTotal = bMonths.reduce((s,v)=>s+v,0);
-    html += `<tr><td style="padding-left:16px;">${gl}</td>${bMonths.map((v,i)=>{ totals[i]+=v; return `<td class="num mono">${fmt(v)}</td>`; }).join('')}<td class="num mono" style="font-weight:700;">${fmt(rowTotal)}</td></tr>`;
-  });
-  const grandTotal = totals.reduce((s,v)=>s+v,0);
-  html += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>TOTAL — ${dept}</td>${totals.map(v=>`<td class="num mono">${fmt(v)}</td>`).join('')}<td class="num mono">${fmt(grandTotal)}</td></tr>`;
-
-  document.getElementById('deptBudgetDetailTable').innerHTML = glsWithBudget.length ? html : `<tr><td>${emptyState('No budget data')}</td></tr>`;
+function renderDeptBudgetDetailTable(dept, budgetRows){
+  const html = buildBudgetDetailHtml_(dept, budgetRows);
+  document.getElementById('deptBudgetDetailTable').innerHTML = html || `<tr><td>${emptyState('No budget data')}</td></tr>`;
 }
 
 // ---------- Department head: add a brand-new budget line item ----------
@@ -1779,69 +1835,27 @@ function switchBuilderTab(tab){
 function toggleBuilderAllAccounts(){ builderExpand.all = !builderExpand.all; renderBuilderDeptView(); }
 function toggleBuilderAccountMonths(gl){ builderExpand.rows[gl] = !builderExpand.rows[gl]; renderBuilderDeptView(); }
 
+function toggleBuilderRevenue(){ builderExpand.rev = (builderExpand.rev === false); renderBuilderDeptView(); }
+
 function renderBuilderDeptView(){
   const dept = document.getElementById('builderDept').value;
   if(!dept) return;
   const b = STATE.budget.filter(r=>r.Dept===dept);
   const a = STATE.actual.filter(r=>r.Dept===dept);
-  const glSet = [...new Set([...b.map(r=>r.GLAccount), ...a.map(r=>r.GLAccount)])].sort();
 
-  const monthlyOf = (rows, gl) => { const arr=Array(12).fill(0); rows.filter(r=>r.GLAccount===gl).forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) arr[m-1]+=Number(r.Amount||0); }); return arr; };
-  const sum = arr => arr.reduce((s,v)=>s+v,0);
-
-  let totalB=0, totalA=0;
-  let rowsHtml = '';
-  glSet.forEach(gl=>{
-    const bMonths = monthlyOf(b, gl), aMonths = monthlyOf(a, gl);
-    const bt = sum(bMonths), at = sum(aMonths);
-    totalB += bt; totalA += at;
-    const isOpen = !!builderExpand.rows[gl];
-    const glEsc = gl.replace(/'/g,"\\'");
-    rowsHtml += `<tr style="cursor:pointer;" onclick="toggleBuilderAccountMonths('${glEsc}')">
-      <td style="padding-left:20px;">${isOpen?'▾':'▸'} ${gl}</td><td class="num mono">${fmt(bt)}</td><td class="num mono">${fmt(at)}</td>
-      <td class="num mono" style="color:${bt-at<0?'var(--bad)':'var(--good)'}">${fmt(bt-at)}</td></tr>`;
-    if(isOpen){
-      MONTHS.forEach((m,mi)=>{
-        rowsHtml += `<tr style="background:var(--paper);">
-          <td style="padding-left:44px; font-size:12.5px; color:var(--muted);">${m}</td>
-          <td class="num mono" style="font-size:12.5px;">${fmt(bMonths[mi])}</td>
-          <td class="num mono" style="font-size:12.5px;">${fmt(aMonths[mi])}</td>
-          <td class="num mono" style="font-size:12.5px; color:${bMonths[mi]-aMonths[mi]<0?'var(--bad)':'var(--good)'}">${fmt(bMonths[mi]-aMonths[mi])}</td></tr>`;
-      });
-    }
-  });
-
-  let html = `<tr><th>Account</th><th class="num">Budget</th><th class="num">Actual</th><th class="num">Variance</th></tr>`;
-  html += `<tr style="font-weight:800; cursor:pointer;" onclick="toggleBuilderAllAccounts()">
-    <td>${builderExpand.all?'▾':'▸'} All accounts (${glSet.length})</td><td class="num mono">${fmt(totalB)}</td><td class="num mono">${fmt(totalA)}</td>
-    <td class="num mono" style="color:${totalB-totalA<0?'var(--bad)':'var(--good)'}">${fmt(totalB-totalA)}</td></tr>`;
-  if(builderExpand.all) html += rowsHtml;
-
+  const html = buildCompareTableHtml_(b, a, builderExpand, 'toggleBuilderAllAccounts', 'toggleBuilderRevenue', 'toggleBuilderAccountMonths');
   document.getElementById('builderCompareTable').innerHTML = html || `<tr><td>${emptyState('No data')}</td></tr>`;
   document.getElementById('bNextYearSuggestionWrap').style.display='none';
   document.getElementById('bItemLevelWrap').style.display='none';
   document.getElementById('bNextYearPct').value='';
   document.getElementById('bNextYearFixed').value='';
 
-  renderBuilderBudgetDetailTable(dept, b, glSet, monthlyOf);
+  renderBuilderBudgetDetailTable(dept, b);
 }
 
-function renderBuilderBudgetDetailTable(dept, budgetRows, glSet, monthlyOf){
-  const header = ['Line'].concat(MONTHS).concat(['Total']);
-  let html = `<tr>${header.map(h=>`<th${h!=='Line'?' class="num"':''}>${h}</th>`).join('')}</tr>`;
-  html += `<tr style="font-weight:800; background:var(--grape-soft);"><td colspan="${header.length}">${dept}</td></tr>`;
-
-  const totals = Array(12).fill(0);
-  const glsWithBudget = glSet.filter(gl => budgetRows.some(r=>r.GLAccount===gl));
-  glsWithBudget.forEach(gl=>{
-    const bMonths = monthlyOf(budgetRows, gl);
-    const rowTotal = bMonths.reduce((s,v)=>s+v,0);
-    html += `<tr><td style="padding-left:16px;">${gl}</td>${bMonths.map((v,i)=>{ totals[i]+=v; return `<td class="num mono">${fmt(v)}</td>`; }).join('')}<td class="num mono" style="font-weight:700;">${fmt(rowTotal)}</td></tr>`;
-  });
-  const grandTotal = totals.reduce((s,v)=>s+v,0);
-  html += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>TOTAL — ${dept}</td>${totals.map(v=>`<td class="num mono">${fmt(v)}</td>`).join('')}<td class="num mono">${fmt(grandTotal)}</td></tr>`;
-
-  document.getElementById('builderDetailTable').innerHTML = glsWithBudget.length ? html : `<tr><td>${emptyState('No budget data')}</td></tr>`;
+function renderBuilderBudgetDetailTable(dept, budgetRows){
+  const html = buildBudgetDetailHtml_(dept, budgetRows);
+  document.getElementById('builderDetailTable').innerHTML = html || `<tr><td>${emptyState('No budget data')}</td></tr>`;
 }
 
 let builderNextYearSuggestion = null;
