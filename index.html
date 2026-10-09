@@ -913,7 +913,11 @@ function completeGoogleLogin(info, freshSignIn){
   }
 }
 
+// Departments that are not offered in the "Switch Department" picker (matched by
+// normalized name, so "B2G", "B2G dep.", "Project" and "Projects" are all covered).
+const HIDDEN_PICKER_DEPTS = ['b2g', 'project', 'projects'];
 function showDeptPickModal(depts){
+  depts = (depts||[]).filter(d => !HIDDEN_PICKER_DEPTS.includes(normDeptKey_(d)));
   document.getElementById('deptPickList').innerHTML = depts.map(d =>
     `<button class="btn gold" style="width:100%;" onclick="chooseDeptFromGoogle('${d.replace(/'/g,"\\'")}')">${d}</button>`
   ).join('');
@@ -1198,8 +1202,9 @@ function buildBudgetDetailHtml_(dept, budgetRows){
 
 function renderDeptView(dept){
   document.getElementById('deptViewTitle').textContent = dept;
-  const b = STATE.budget.filter(r=>r.Dept===dept);
-  const a = STATE.actual.filter(r=>r.Dept===dept);
+  const dk = normDeptKey_(dept);   // tolerate "Marketing" vs "Marketing dep." spelling differences in the sheet
+  const b = STATE.budget.filter(r=>normDeptKey_(r.Dept)===dk);
+  const a = STATE.actual.filter(r=>normDeptKey_(r.Dept)===dk);
 
   const html = buildCompareTableHtml_(dept, b, a, deptExpand, 'toggleAllAccounts', 'toggleDeptRevenue', 'toggleAccountMonths');
   document.getElementById('deptCompareTable').innerHTML = html || `<tr><td>${emptyState('No data')}</td></tr>`;
@@ -1870,8 +1875,9 @@ function toggleBuilderRevenue(){ builderExpand.rev = (builderExpand.rev === fals
 function renderBuilderDeptView(){
   const dept = document.getElementById('builderDept').value;
   if(!dept) return;
-  const b = STATE.budget.filter(r=>r.Dept===dept);
-  const a = STATE.actual.filter(r=>r.Dept===dept);
+  const dk = normDeptKey_(dept);
+  const b = STATE.budget.filter(r=>normDeptKey_(r.Dept)===dk);
+  const a = STATE.actual.filter(r=>normDeptKey_(r.Dept)===dk);
 
   const html = buildCompareTableHtml_(dept, b, a, builderExpand, 'toggleBuilderAllAccounts', 'toggleBuilderRevenue', 'toggleBuilderAccountMonths');
   document.getElementById('builderCompareTable').innerHTML = html || `<tr><td>${emptyState('No data')}</td></tr>`;
