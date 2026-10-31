@@ -475,6 +475,7 @@
         </div>
         <select class="year-select" id="incomeYear"></select>
       </div>
+      <div class="card" id="incomeControls" style="margin-bottom:14px;"></div>
       <div class="card">
         <table id="incomeTable"></table>
       </div>
@@ -763,6 +764,7 @@ const WORKER_URL = 'https://aanaab-budget-api.mfatouh.workers.dev';
 const WORKER_GOOGLE_CLIENT_ID = '1019196001675-9p6i5ufe1u5jeq9b4h9u5p8db3528aut.apps.googleusercontent.com';
 const TOKEN_KEY = 'aanaabWorkerIdToken';
 let ID_TOKEN = '';
+STATE.settings = {};
 function loadStoredToken_(){
   try{
     const o = JSON.parse(localStorage.getItem(TOKEN_KEY)||'null');
@@ -791,6 +793,7 @@ function splitGl_(s){
 function glLabel_(gl, name){ return name ? (gl+' '+name) : gl; }
 async function workerPostLogin(){
   try{
+    try{ STATE.settings = await wCall('getSettings'); }catch(e){ STATE.settings = {}; }
     const yrs = await wCall('years');
     const cy = new Date().getFullYear();
     const set = new Set((yrs||[]).map(Number)); set.add(cy);
@@ -812,41 +815,60 @@ const IS_CATS = {
   OTHERS:[649000,665000,666000,672000,686000,690000], FULLDA:[624000,624010,624020], OTHERINC:[424090,490010,702000],
   ADMINLOAN:[634010], INTEREST:[634000], INCTAX:[693510]
 };
-function isColumn_(by, f){
+function isColumn_(by, f, ov){
   const sum = (codes)=>codes.reduce((s,c)=>s+((by[String(c)]||{})[f]||0),0);
   const c = {};
-  c.b2c=sum(IS_CATS.B2C); c.b2b=sum(IS_CATS.B2B); c.b2g=sum(IS_CATS.B2G); c.totalRevenue=c.b2c+c.b2b+c.b2g;
-  c.projectsCogs=-sum(IS_CATS.PROJECTS_COGS); c.revenueShare=-sum(IS_CATS.REVENUE_SHARE); c.hosting=-sum(IS_CATS.HOSTING);
-  c.content=-sum(IS_CATS.CONTENT); c.amortisation=-sum(IS_CATS.AMORT);
+  const O = ov||{};
+  const ovr=(k,v)=> (O[k]!==undefined ? O[k] : v);
+  c.b2c=ovr('b2c',sum(IS_CATS.B2C)); c.b2b=ovr('b2b',sum(IS_CATS.B2B)); c.b2g=ovr('b2g',sum(IS_CATS.B2G)); c.totalRevenue=c.b2c+c.b2b+c.b2g;
+  c.projectsCogs=ovr('projectsCogs',-sum(IS_CATS.PROJECTS_COGS)); c.revenueShare=ovr('revenueShare',-sum(IS_CATS.REVENUE_SHARE)); c.hosting=ovr('hosting',-sum(IS_CATS.HOSTING));
+  c.content=ovr('content',-sum(IS_CATS.CONTENT)); c.amortisation=ovr('amortisation',-sum(IS_CATS.AMORT));
   c.costOfRevenue=c.projectsCogs+c.revenueShare+c.hosting+c.content+c.amortisation;
   c.grossProfit=c.totalRevenue+c.costOfRevenue;
-  c.salaries=-sum(IS_CATS.SALARIES); c.marketing=-sum(IS_CATS.MARKETING); c.professional=-sum(IS_CATS.PROFESSIONAL); c.gosi=-sum(IS_CATS.GOSI);
-  c.dues=-sum(IS_CATS.DUES); c.taxes=-sum(IS_CATS.TAXES); c.rent=-sum(IS_CATS.RENT); c.internet=-sum(IS_CATS.INTERNET);
-  c.bankFees=-sum(IS_CATS.BANK); c.zStore=-sum(IS_CATS.ZSTORE); c.govExp=-sum(IS_CATS.GOV); c.paymentFees=-sum(IS_CATS.PAYFEES);
-  c.accreditation=-sum(IS_CATS.ACCRED); c.others=-sum(IS_CATS.OTHERS);
+  c.salaries=ovr('salaries',-sum(IS_CATS.SALARIES)); c.marketing=ovr('marketing',-sum(IS_CATS.MARKETING)); c.professional=ovr('professional',-sum(IS_CATS.PROFESSIONAL)); c.gosi=ovr('gosi',-sum(IS_CATS.GOSI));
+  c.dues=ovr('dues',-sum(IS_CATS.DUES)); c.taxes=ovr('taxes',-sum(IS_CATS.TAXES)); c.rent=ovr('rent',-sum(IS_CATS.RENT)); c.internet=ovr('internet',-sum(IS_CATS.INTERNET));
+  c.bankFees=ovr('bankFees',-sum(IS_CATS.BANK)); c.zStore=ovr('zStore',-sum(IS_CATS.ZSTORE)); c.govExp=ovr('govExp',-sum(IS_CATS.GOV)); c.paymentFees=ovr('paymentFees',-sum(IS_CATS.PAYFEES));
+  c.accreditation=ovr('accreditation',-sum(IS_CATS.ACCRED)); c.others=ovr('others',-sum(IS_CATS.OTHERS));
   c.otherOpex=c.salaries+c.marketing+c.professional+c.gosi+c.dues+c.taxes+c.rent+c.internet+c.bankFees+c.zStore+c.govExp+c.paymentFees+c.accreditation+c.others;
-  c.addBackDA=sum(IS_CATS.AMORT); c.ebitda=c.grossProfit+c.otherOpex+c.addBackDA;
-  c.deprAmort=-sum(IS_CATS.FULLDA); c.otherIncome=sum(IS_CATS.OTHERINC); c.adminLoan=-sum(IS_CATS.ADMINLOAN);
-  c.interestExp=-sum(IS_CATS.INTEREST); c.incomeTax=-sum(IS_CATS.INCTAX);
+  c.addBackDA=ovr('addBackDA',sum(IS_CATS.AMORT)); c.ebitda=c.grossProfit+c.otherOpex+c.addBackDA;
+  c.deprAmort=ovr('deprAmort',-sum(IS_CATS.FULLDA)); c.otherIncome=ovr('otherIncome',sum(IS_CATS.OTHERINC)); c.adminLoan=ovr('adminLoan',-sum(IS_CATS.ADMINLOAN));
+  c.interestExp=ovr('interestExp',-sum(IS_CATS.INTEREST)); c.incomeTax=ovr('incomeTax',-sum(IS_CATS.INCTAX));
   c.netProfit=c.ebitda+c.deprAmort+c.otherIncome+c.adminLoan+c.interestExp+c.incomeTax;
   return c;
 }
 const IS_LINES = [['b2c','B2C'],['b2b','B2B'],['b2g','B2G'],['totalRevenue','Total Revenue',1],['projectsCogs','Projects COGS'],['revenueShare','Revenue Share'],['hosting','Hosting'],['content','Content'],['amortisation','Amortisation'],['costOfRevenue','Cost of revenue',1],['grossProfit','Gross profit',1],['salaries','Salaries and other employee benefits'],['marketing','Marketing expenses'],['professional','Professional charges'],['gosi','GOSI expenses'],['dues','Dues and Subscriptions'],['taxes','Taxs'],['rent','Rent'],['internet','internet'],['bankFees','Bank Fees'],['zStore','Z Store'],['govExp','Government Exp'],['paymentFees','Payment Methods Fees'],['accreditation','Accreditation'],['others','others'],['otherOpex','Other operating expenses',1],['addBackDA','Add back: Amortisation (COGS)'],['ebitda','EBITDA',1],['deprAmort','Depreciation and amortization'],['otherIncome','Other income (interest)'],['adminLoan','Administration Expense for loan'],['interestExp','Interest expense'],['incomeTax','Income Tax'],['netProfit','Net Profit / Loss',1]];
+const IS_TOTAL_KEYS = new Set(['totalRevenue','costOfRevenue','grossProfit','otherOpex','ebitda','netProfit']);
+function currentMonth_(){ return new Date().getMonth()+1; }
+function actualsThrough_(year){
+  const v = STATE.settings && STATE.settings['actuals_through_'+year];
+  if(v !== undefined && v !== '') return Number(v);
+  const cy = new Date().getFullYear();
+  if(year < cy) return 12;
+  if(year > cy) return 0;
+  return Math.max(0, currentMonth_()-1);
+}
+function budgetThrough_(year){
+  const v = STATE.settings && STATE.settings['budget_through_'+year];
+  return (v !== undefined && v !== '') ? Number(v) : 12;
+}
 async function buildIncomeData_(year){
-  const [bud, act, actPrior] = await Promise.all([ wCall('getBudget',{year}), wCall('getActuals',{year}), wCall('getActuals',{year:year-1}) ]);
+  const [bud, act, actPrior, fc] = await Promise.all([ wCall('getBudget',{year}), wCall('getActuals',{year}), wCall('getActuals',{year:year-1}), wCall('getForecast',{year}) ]);
   const budApproved = bud.filter(r=>r.status==='approved' || r.status===undefined);
-  if(!budApproved.length && !act.length) return { header:[], rows:[] };
-  const lastM = act.reduce((m,r)=>Math.max(m, Number(r.month)||0), 0);
+  if(!budApproved.length && !act.length) return { header:[], rows:[], controls:true };
+  const aT = actualsThrough_(year), bT = budgetThrough_(year);
   const by = {};
   const slot = (gl)=> by[gl] || (by[gl] = { actual25:0, actual26:0, budget26:0, forecast26:0 });
   actPrior.forEach(r=>{ slot(r.gl).actual25 += Number(r.amount)||0; });
-  act.forEach(r=>{ const s=slot(r.gl); s.actual26 += Number(r.amount)||0; s.forecast26 += Number(r.amount)||0; });
-  budApproved.forEach(r=>{ const s=slot(r.gl); const a=Number(r.amount)||0; s.budget26 += a; if(Number(r.month) > lastM) s.forecast26 += a; });
-  const cols = { actualPrior:isColumn_(by,'actual25'), actualYear:isColumn_(by,'actual26'), budgetYear:isColumn_(by,'budget26'), forecastYear:isColumn_(by,'forecast26') };
+  act.forEach(r=>{ if(Number(r.month) > aT) return; const s=slot(r.gl); const a=Number(r.amount)||0; s.actual26 += a; s.forecast26 += a; });
+  budApproved.forEach(r=>{ const s=slot(r.gl); const a=Number(r.amount)||0; const m=Number(r.month); if(m <= bT) s.budget26 += a; if(m > aT) s.forecast26 += a; });
+  const ov = {}; (fc||[]).forEach(o=>{ ov[o.line_key] = Number(o.amount); });
+  const cols = { actualPrior:isColumn_(by,'actual25'), actualYear:isColumn_(by,'actual26'), budgetYear:isColumn_(by,'budget26'), forecastYear:isColumn_(by,'forecast26',ov) };
   const r2 = v=>Math.round(v*100)/100;
+  const label = (n)=> n===0 ? 'none' : ('Jan–'+MONTHS[n-1]);
   return {
-    header:['Income Statement — All figures in SAR','Actual '+(year-1),'Actual '+year,'Budget '+year,'Forecast '+year+(lastM?' (actual to '+MONTHS[lastM-1]+' + budget)':'')],
-    rows: IS_LINES.map(l=>({ label:l[1], bold:!!l[2], actualPrior:r2(cols.actualPrior[l[0]]), actualYear:r2(cols.actualYear[l[0]]), budgetYear:r2(cols.budgetYear[l[0]]), forecastYear:r2(cols.forecastYear[l[0]]) }))
+    header:['Income Statement — All figures in SAR','Actual '+(year-1),'Actual '+year+' ('+label(aT)+')','Budget '+year+' ('+label(bT)+')','Forecast '+year+' (actual '+label(aT)+' + budget rest)'],
+    rows: IS_LINES.map(l=>({ key:l[0], label:l[1], bold:!!l[2], leaf:!IS_TOTAL_KEYS.has(l[0]), overridden: ov[l[0]]!==undefined,
+      actualPrior:r2(cols.actualPrior[l[0]]), actualYear:r2(cols.actualYear[l[0]]), budgetYear:r2(cols.budgetYear[l[0]]), forecastYear:r2(cols.forecastYear[l[0]]) }))
   };
 }
 async function apiGet(params){
@@ -867,7 +889,7 @@ async function apiGet(params){
     const [b, a] = await Promise.all([ wCall('getBudget',{year:y}), wCall('getActuals',{year:y}) ]);
     return {
       budget: b.map(r=>({ Year:y, Dept:r.dept, GLAccount:glLabel_(r.gl,r.account_name), AccountType:'Opex', Month:r.month, Amount:r.amount, Status:r.status })),
-      actual: a.map(r=>({ Year:y, Dept:r.dept, GLAccount:glLabel_(r.gl,r.account_name), Month:r.month, Amount:r.amount }))
+      actual: a.filter(r=>Number(r.month) <= actualsThrough_(y)).map(r=>({ Year:y, Dept:r.dept, GLAccount:glLabel_(r.gl,r.account_name), Month:r.month, Amount:r.amount }))
     };
   }
   throw new Error('Unsupported request: '+params);
@@ -882,7 +904,9 @@ async function apiPost(payload){
       return { ok:true, result:{ email:me.email, depts: admin ? [] : String(me.depts||'').split(',').map(s=>s.trim()).filter(Boolean), isFinance: admin } };
     }
     if(act === 'syncActualsNow'){
-      const now = new Date(); const y = now.getFullYear(), m = now.getMonth()+1;
+      const y = Number(payload.year) || new Date().getFullYear();
+      const m = actualsThrough_(y);
+      if(m < 1) throw new Error('No closed months to sync for '+y+' — raise "Actual through month" in Income Statement first');
       for(let mm=1; mm<=m; mm++){ await wCall('syncActuals',{year:y, month:mm}); }
       return { ok:true, result:{ year:y, month:m } };
     }
@@ -911,6 +935,8 @@ async function apiPost(payload){
       await wCall('deleteBudgetLine', { year:payload.year, dept:payload.dept, gl:splitGl_(payload.glAccount).gl });
       return { ok:true, result:{} };
     }
+    if(act === 'setSetting'){ await wCall('setSetting',{key:payload.key,value:payload.value}); STATE.settings[payload.key]=String(payload.value); return {ok:true,result:{}}; }
+    if(act === 'setForecast'){ await wCall('setForecast',{year:payload.year,line_key:payload.line_key,amount:payload.amount}); return {ok:true,result:{}}; }
     if(act === 'approveBudget' || act === 'rejectBudget'){
       await wCall('setApproval', { year:payload.year, dept:payload.dept, status: act==='approveBudget' ? 'approved' : 'rejected' });
       return { ok:true, result:{} };
@@ -1195,7 +1221,7 @@ async function refreshActualsFromOdoo(btn){
   btn.disabled = true;
   btn.textContent = '⏳ Syncing…';
   try{
-    const res = await apiPost({action:'syncActualsNow'});
+    const res = await apiPost({action:'syncActualsNow', year: STATE.year});
     if(res.ok){
       toast('Actuals refreshed for ' + getMonthName_(res.result.month) + ' ' + res.result.year);
       await loadYear(STATE.year);
@@ -1752,11 +1778,14 @@ function renderIncomeStatementTableInto_(elId, data, fallbackYear){
   function rowHtml(r, indent){
     const style = r.bold ? 'font-weight:800; border-top:2px solid var(--line);' : '';
     const pad = indent ? `padding-left:${indent}px; font-size:12.5px; color:var(--muted);` : '';
+    const fcCell = (r.leaf && elId==='incomeTable')
+      ? `<td class="num mono" style="${indent?'font-size:12.5px;':''}cursor:pointer; text-decoration:underline dotted; ${r.overridden?'color:#B8860B; font-weight:800;':''}" title="Click to set a manual forecast" onclick="editForecast('${r.key}','${String(r.label).replace(/'/g,"\\'")}',${r.forecastYear})">${r.overridden?'✎ ':''}${fmt(r.forecastYear)}</td>`
+      : `<td class="num mono"${indent?' style="font-size:12.5px;"':''}>${fmt(r.forecastYear)}</td>`;
     return `<tr style="${style}${indent?' background:var(--paper);':''}"><td style="${pad}">${r.label}</td>
       <td class="num mono"${indent?' style="font-size:12.5px;"':''}>${fmt(r.actualPrior)}</td>
       <td class="num mono"${indent?' style="font-size:12.5px;"':''}>${fmt(r.actualYear)}</td>
       <td class="num mono"${indent?' style="font-size:12.5px;"':''}>${fmt(r.budgetYear)}</td>
-      <td class="num mono"${indent?' style="font-size:12.5px;"':''}>${fmt(r.forecastYear)}</td></tr>`;
+      ${fcCell}</tr>`;
   }
 
   let html = `<tr>${header.map((h,i)=>`<th${i>0?' class="num"':''}>${h}</th>`).join('')}</tr>`;
@@ -1785,7 +1814,43 @@ function renderIncomeStatementTableInto_(elId, data, fallbackYear){
   return true;
 }
 
+
+async function editForecast(key, label, current){
+  const v = prompt('Manual forecast for "'+label+'" ('+STATE.year+'), SAR — sign as shown in the table (costs are negative).\nLeave empty to go back to the automatic forecast.', String(current));
+  if(v === null) return;
+  const t = v.trim().replace(/,/g,'');
+  const res = await apiPost({ action:'setForecast', year:STATE.year, line_key:key, amount: t==='' ? null : Number(t) });
+  if(!res.ok){ toast('Not saved: '+res.error); return; }
+  toast(t===''?'Back to automatic forecast':'Forecast saved');
+  renderIncomeStatement();
+}
+async function setIncomeSetting(kind, val){
+  const res = await apiPost({ action:'setSetting', key: kind+'_through_'+STATE.year, value: val });
+  if(!res.ok){ toast('Not saved: '+res.error); return; }
+  if(kind==='actuals'){ await loadYear(STATE.year); }
+  renderIncomeStatement();
+}
+async function syncIncomeYear(year, btn){
+  const t = btn.textContent; btn.disabled = true; btn.textContent = '⏳ Syncing '+year+'…';
+  const res = await apiPost({ action:'syncActualsNow', year });
+  btn.disabled = false; btn.textContent = t;
+  toast(res.ok ? ('Actuals '+year+' synced from Odoo') : ('Sync failed: '+res.error));
+  if(STATE.year === year) await loadYear(year);
+  renderIncomeStatement();
+}
+function renderIncomeControls_(){
+  const box = document.getElementById('incomeControls'); if(!box) return;
+  const y = STATE.year, aT = actualsThrough_(y), bT = budgetThrough_(y);
+  const opts = (sel, withZero)=> (withZero?[`<option value="0"${sel===0?' selected':''}>None</option>`]:[]).concat(MONTHS.map((m,i)=>`<option value="${i+1}"${sel===i+1?' selected':''}>Jan–${m}</option>`)).join('');
+  box.innerHTML = `<div style="display:flex; flex-wrap:wrap; gap:18px; align-items:flex-end;">
+    <label style="font-size:12px; color:var(--muted);">Actual through month<br><select onchange="setIncomeSetting('actuals', this.value)">${opts(aT,true)}</select></label>
+    <label style="font-size:12px; color:var(--muted);">Budget through month<br><select onchange="setIncomeSetting('budget', this.value)">${opts(bT,false)}</select></label>
+    <button class="btn ghost" onclick="syncIncomeYear(${y-1}, this)">🔄 Sync ${y-1} actuals</button>
+    <button class="btn ghost" onclick="syncIncomeYear(${y}, this)">🔄 Sync ${y} actuals</button>
+    <div style="font-size:12px; color:var(--muted);">Forecast = actual for the months you choose + budget for the rest. Click any Forecast number to override it.</div></div>`;
+}
 async function renderIncomeStatement(){
+  renderIncomeControls_();
   const wrap = document.getElementById('incomeTable');
   wrap.innerHTML = `<tr><td>${emptyState('Loading…')}</td></tr>`;
   document.getElementById('incomeNextYearWrap').style.display = 'none';
