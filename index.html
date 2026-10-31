@@ -700,8 +700,7 @@ window.addEventListener('DOMContentLoaded', async ()=>{
     }catch(e){ /* no config.json yet — fall through to manual first-run setup */ }
   }
 
-  if (API_URL){ document.getElementById('settingsUrlInput').value = API_URL; boot(); }
-  else { document.getElementById('page-setup-first').style.display='block'; }
+  boot();
 });
 
 // Saves the Web App URL into config.json in the GitHub repo via GitHub's own API, so
@@ -759,15 +758,117 @@ function saveSettingsUrl(){
   boot();
 }
 
+// ---------- Cloudflare Worker backend (replaces the Apps Script Web App) ----------
+const WORKER_URL = 'https://aanaab-budget-api.mfatouh.workers.dev';
+const WORKER_GOOGLE_CLIENT_ID = '1019196001675-9p6i5ufe1u5jeq9b4h9u5p8db3528aut.apps.googleusercontent.com';
+const TOKEN_KEY = 'aanaabWorkerIdToken';
+let ID_TOKEN = '';
+function loadStoredToken_(){
+  try{
+    const o = JSON.parse(localStorage.getItem(TOKEN_KEY)||'null');
+    if(o && o.t && (Date.now()-o.ts) < 50*60*1000){ ID_TOKEN = o.t; return true; }
+    localStorage.removeItem(TOKEN_KEY);
+  }catch(e){}
+  return false;
+}
+function storeToken_(t){ ID_TOKEN = t; try{ localStorage.setItem(TOKEN_KEY, JSON.stringify({t, ts:Date.now()})); }catch(e){} }
+async function wCall(action, payload){
+  if(!ID_TOKEN) throw new Error('Please sign in with Google first');
+  const res = await fetch(WORKER_URL, { method:'POST', headers:{ 'content-type':'application/json', Authorization:'Bearer '+ID_TOKEN }, body: JSON.stringify(Object.assign({action}, payload||{})) });
+  const j = await res.json().catch(()=>({ok:false,error:'HTTP '+res.status}));
+  if(j.ok === false || j.error){
+    const msg = String(j.error||'request failed');
+    if(/token|expired|audience/i.test(msg)){ try{ localStorage.removeItem(TOKEN_KEY); }catch(e){} ID_TOKEN=''; toast('Your session expired — please sign in again'); try{ googleSignOut(); }catch(e){} }
+    throw new Error(msg);
+  }
+  return j.data;
+}
+function splitGl_(s){
+  s = String(s||'').trim();
+  const m = /^(\d{3,})\s*(.*)$/.exec(s);
+  return m ? { gl:m[1], name:m[2] } : { gl:s, name:'' };
+}
+function glLabel_(gl, name){ return name ? (gl+' '+name) : gl; }
+async function workerPostLogin(){
+  try{
+    const yrs = await wCall('years');
+    const cy = new Date().getFullYear();
+    const set = new Set((yrs||[]).map(Number)); set.add(cy);
+    STATE.years = [...set].sort();
+    STATE.year = STATE.years.includes(cy) ? cy : STATE.years[STATE.years.length-1];
+    ['yearSelect','builderYear','varianceYear','incomeYear','detailYear'].forEach(id=>{ populateSelect(id, STATE.years, true); document.getElementById(id).value = STATE.year; });
+    await loadYear(STATE.year);
+  }catch(e){ console.error(e); toast('Could not load data: '+e.message); }
+}
 async function apiGet(params){
-  const url = API_URL + (API_URL.includes('?')?'&':'?') + params;
-  const res = await fetch(url);
-  if(!res.ok) throw new Error('HTTP '+res.status);
-  return res.json();
+  const q = new URLSearchParams(params);
+  const action = q.get('action');
+  if(action === 'years') return { years:[new Date().getFullYear()] };
+  if(action === 'googleConfig') return { clientId: WORKER_GOOGLE_CLIENT_ID };
+  if(action === 'initiatives') return { initiatives:[] };
+  if(action === 'initiativeLinks') return { links:{} };
+  if(action === 'incomeStatement') throw new Error('Income statement is being rebuilt on the new system');
+  if(action === 'pendingApprovals'){
+    const rows = await wCall('pendingApprovals');
+    return { pending: rows.map(r=>({ Dept:r.dept, Year:r.year, GLAccount:glLabel_(r.gl,r.account_name), Month:r.month, Amount:r.amount, SubmittedAt:r.updated_at })) };
+  }
+  if(q.get('year')){
+    if(!ID_TOKEN) return { budget:[], actual:[] };
+    const y = Number(q.get('year'));
+    const [b, a] = await Promise.all([ wCall('getBudget',{year:y}), wCall('getActuals',{year:y}) ]);
+    return {
+      budget: b.map(r=>({ Year:y, Dept:r.dept, GLAccount:glLabel_(r.gl,r.account_name), AccountType:'Opex', Month:r.month, Amount:r.amount, Status:r.status })),
+      actual: a.map(r=>({ Year:y, Dept:r.dept, GLAccount:glLabel_(r.gl,r.account_name), Month:r.month, Amount:r.amount }))
+    };
+  }
+  throw new Error('Unsupported request: '+params);
 }
 async function apiPost(payload){
-  const res = await fetch(API_URL, {method:'POST', body: JSON.stringify(payload)});
-  return res.json();
+  try{
+    const act = payload.action;
+    if(act === 'verifyGoogleLogin'){
+      storeToken_(payload.idToken);
+      const me = await wCall('me');
+      const admin = me.role==='admin' || me.depts==='*';
+      return { ok:true, result:{ email:me.email, depts: admin ? [] : String(me.depts||'').split(',').map(s=>s.trim()).filter(Boolean), isFinance: admin } };
+    }
+    if(act === 'syncActualsNow'){
+      const now = new Date(); const y = now.getFullYear(), m = now.getMonth()+1;
+      if(now.getDate() <= 7){ const pm = m===1?12:m-1, py = m===1?y-1:y; await wCall('syncActuals',{year:py, month:pm}); }
+      await wCall('syncActuals',{year:y, month:m});
+      return { ok:true, result:{ year:y, month:m } };
+    }
+    if(act === 'saveBudget' || act === 'submitBudgetForApproval'){
+      const groups = {};
+      (payload.rows||[]).forEach(r=>{
+        const year = r.year || payload.year, dept = r.dept || payload.dept;
+        const k = year+'|'+dept;
+        if(!groups[k]) groups[k] = { year, dept, rows:[] };
+        const g = splitGl_(r.glAccount);
+        groups[k].rows.push({ gl:g.gl, account_name:g.name, month:r.month, amount:r.amount });
+      });
+      for(const g of Object.values(groups)){
+        await wCall('saveBudget', g);
+        if(act === 'submitBudgetForApproval') await wCall('setApproval', { year:g.year, dept:g.dept, status:'submitted' });
+      }
+      return { ok:true, result:{} };
+    }
+    if(act === 'addBudgetLine'){
+      const g = splitGl_(payload.glAccount);
+      const rows = (payload.monthlyAmounts||[]).map((v,i)=>({ gl:g.gl, account_name:g.name, month:i+1, amount:v }));
+      await wCall('saveBudget', { year:payload.year, dept:payload.dept, rows });
+      return { ok:true, result:{} };
+    }
+    if(act === 'deleteBudgetLine'){
+      await wCall('deleteBudgetLine', { year:payload.year, dept:payload.dept, gl:splitGl_(payload.glAccount).gl });
+      return { ok:true, result:{} };
+    }
+    if(act === 'approveBudget' || act === 'rejectBudget'){
+      await wCall('setApproval', { year:payload.year, dept:payload.dept, status: act==='approveBudget' ? 'approved' : 'rejected' });
+      return { ok:true, result:{} };
+    }
+    return { ok:false, error:'Unsupported action: '+act };
+  }catch(e){ return { ok:false, error:e.message }; }
 }
 
 // "Expenses" and "Unassigned" aren't real departments (they're catch-all buckets for
@@ -870,7 +971,8 @@ function restoreGoogleSession(){
     document.getElementById('googleSignedInBar').style.display='flex';
     document.getElementById('googleSignedInEmail').textContent = sess.email;
     STATE.googleEmail = sess.email;
-    completeGoogleLogin(sess, false);
+    if(!loadStoredToken_()){ localStorage.removeItem(GOOGLE_SESSION_KEY); document.getElementById('googleSignedInBar').style.display='none'; return false; }
+    workerPostLogin().then(()=>completeGoogleLogin(sess, false));
     return true;
   }catch(e){ return false; }
 }
@@ -881,6 +983,7 @@ async function onGoogleCredential(response){
     const res = await apiPost({ action:'verifyGoogleLogin', idToken: response.credential });
     if(!res.ok) throw new Error(res.error || 'Sign-in failed');
     const info = res.result;
+    await workerPostLogin();
     STATE.googleEmail = info.email;
     localStorage.setItem(GOOGLE_SESSION_KEY, JSON.stringify({ email: info.email, depts: info.depts||[], isFinance: !!info.isFinance, ts: Date.now() }));
     document.getElementById('googleSignInSection').style.display='none';
@@ -929,7 +1032,7 @@ function chooseDeptFromGoogle(dept){
 }
 
 function googleSignOut(){
-  localStorage.removeItem(GOOGLE_SESSION_KEY);
+  localStorage.removeItem(GOOGLE_SESSION_KEY); localStorage.removeItem(TOKEN_KEY); ID_TOKEN='';
   STATE.googleEmail = null;
   try{ if(window.google && google.accounts && google.accounts.id) google.accounts.id.disableAutoSelect(); }catch(e){}
   showDeptGate();
