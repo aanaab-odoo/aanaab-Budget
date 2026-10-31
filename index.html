@@ -800,6 +800,55 @@ async function workerPostLogin(){
     await loadYear(STATE.year);
   }catch(e){ console.error(e); toast('Could not load data: '+e.message); }
 }
+
+// ---------- Income statement (built from budget + actuals, same categories as the old sheet) ----------
+const IS_CATS = {
+  B2C:[424010,424040,424070,474000,479100,479110], B2B:[489010], B2G:[479000],
+  PROJECTS_COGS:[551010,551020,551040,551050,551060,551070], REVENUE_SHARE:[503000,503010,503020,503030,503040], HOSTING:[511010],
+  CONTENT:[535000,541010,650000,650030,650040,650050,650060], AMORT:[624010,624020],
+  SALARIES:[602000,620000,660000,660010,680000,680020,680030,680040,680050,681000,681010,693200],
+  MARKETING:[643000,643030,643040,643060], PROFESSIONAL:[667000], GOSI:[693100], DUES:[625000], TAXES:[693300], RENT:[671000],
+  INTERNET:[617000], BANK:[604000], ZSTORE:[604012], GOV:[693700], PAYFEES:[604001,604002,604022], ACCRED:[693710],
+  OTHERS:[649000,665000,666000,672000,686000,690000], FULLDA:[624000,624010,624020], OTHERINC:[424090,490010,702000],
+  ADMINLOAN:[634010], INTEREST:[634000], INCTAX:[693510]
+};
+function isColumn_(by, f){
+  const sum = (codes)=>codes.reduce((s,c)=>s+((by[String(c)]||{})[f]||0),0);
+  const c = {};
+  c.b2c=sum(IS_CATS.B2C); c.b2b=sum(IS_CATS.B2B); c.b2g=sum(IS_CATS.B2G); c.totalRevenue=c.b2c+c.b2b+c.b2g;
+  c.projectsCogs=-sum(IS_CATS.PROJECTS_COGS); c.revenueShare=-sum(IS_CATS.REVENUE_SHARE); c.hosting=-sum(IS_CATS.HOSTING);
+  c.content=-sum(IS_CATS.CONTENT); c.amortisation=-sum(IS_CATS.AMORT);
+  c.costOfRevenue=c.projectsCogs+c.revenueShare+c.hosting+c.content+c.amortisation;
+  c.grossProfit=c.totalRevenue+c.costOfRevenue;
+  c.salaries=-sum(IS_CATS.SALARIES); c.marketing=-sum(IS_CATS.MARKETING); c.professional=-sum(IS_CATS.PROFESSIONAL); c.gosi=-sum(IS_CATS.GOSI);
+  c.dues=-sum(IS_CATS.DUES); c.taxes=-sum(IS_CATS.TAXES); c.rent=-sum(IS_CATS.RENT); c.internet=-sum(IS_CATS.INTERNET);
+  c.bankFees=-sum(IS_CATS.BANK); c.zStore=-sum(IS_CATS.ZSTORE); c.govExp=-sum(IS_CATS.GOV); c.paymentFees=-sum(IS_CATS.PAYFEES);
+  c.accreditation=-sum(IS_CATS.ACCRED); c.others=-sum(IS_CATS.OTHERS);
+  c.otherOpex=c.salaries+c.marketing+c.professional+c.gosi+c.dues+c.taxes+c.rent+c.internet+c.bankFees+c.zStore+c.govExp+c.paymentFees+c.accreditation+c.others;
+  c.addBackDA=sum(IS_CATS.AMORT); c.ebitda=c.grossProfit+c.otherOpex+c.addBackDA;
+  c.deprAmort=-sum(IS_CATS.FULLDA); c.otherIncome=sum(IS_CATS.OTHERINC); c.adminLoan=-sum(IS_CATS.ADMINLOAN);
+  c.interestExp=-sum(IS_CATS.INTEREST); c.incomeTax=-sum(IS_CATS.INCTAX);
+  c.netProfit=c.ebitda+c.deprAmort+c.otherIncome+c.adminLoan+c.interestExp+c.incomeTax;
+  return c;
+}
+const IS_LINES = [['b2c','B2C'],['b2b','B2B'],['b2g','B2G'],['totalRevenue','Total Revenue',1],['projectsCogs','Projects COGS'],['revenueShare','Revenue Share'],['hosting','Hosting'],['content','Content'],['amortisation','Amortisation'],['costOfRevenue','Cost of revenue',1],['grossProfit','Gross profit',1],['salaries','Salaries and other employee benefits'],['marketing','Marketing expenses'],['professional','Professional charges'],['gosi','GOSI expenses'],['dues','Dues and Subscriptions'],['taxes','Taxs'],['rent','Rent'],['internet','internet'],['bankFees','Bank Fees'],['zStore','Z Store'],['govExp','Government Exp'],['paymentFees','Payment Methods Fees'],['accreditation','Accreditation'],['others','others'],['otherOpex','Other operating expenses',1],['addBackDA','Add back: Amortisation (COGS)'],['ebitda','EBITDA',1],['deprAmort','Depreciation and amortization'],['otherIncome','Other income (interest)'],['adminLoan','Administration Expense for loan'],['interestExp','Interest expense'],['incomeTax','Income Tax'],['netProfit','Net Profit / Loss',1]];
+async function buildIncomeData_(year){
+  const [bud, act, actPrior] = await Promise.all([ wCall('getBudget',{year}), wCall('getActuals',{year}), wCall('getActuals',{year:year-1}) ]);
+  const budApproved = bud.filter(r=>r.status==='approved' || r.status===undefined);
+  if(!budApproved.length && !act.length) return { header:[], rows:[] };
+  const lastM = act.reduce((m,r)=>Math.max(m, Number(r.month)||0), 0);
+  const by = {};
+  const slot = (gl)=> by[gl] || (by[gl] = { actual25:0, actual26:0, budget26:0, forecast26:0 });
+  actPrior.forEach(r=>{ slot(r.gl).actual25 += Number(r.amount)||0; });
+  act.forEach(r=>{ const s=slot(r.gl); s.actual26 += Number(r.amount)||0; s.forecast26 += Number(r.amount)||0; });
+  budApproved.forEach(r=>{ const s=slot(r.gl); const a=Number(r.amount)||0; s.budget26 += a; if(Number(r.month) > lastM) s.forecast26 += a; });
+  const cols = { actualPrior:isColumn_(by,'actual25'), actualYear:isColumn_(by,'actual26'), budgetYear:isColumn_(by,'budget26'), forecastYear:isColumn_(by,'forecast26') };
+  const r2 = v=>Math.round(v*100)/100;
+  return {
+    header:['Income Statement — All figures in SAR','Actual '+(year-1),'Actual '+year,'Budget '+year,'Forecast '+year+(lastM?' (actual to '+MONTHS[lastM-1]+' + budget)':'')],
+    rows: IS_LINES.map(l=>({ label:l[1], bold:!!l[2], actualPrior:r2(cols.actualPrior[l[0]]), actualYear:r2(cols.actualYear[l[0]]), budgetYear:r2(cols.budgetYear[l[0]]), forecastYear:r2(cols.forecastYear[l[0]]) }))
+  };
+}
 async function apiGet(params){
   const q = new URLSearchParams(params);
   const action = q.get('action');
@@ -807,7 +856,7 @@ async function apiGet(params){
   if(action === 'googleConfig') return { clientId: WORKER_GOOGLE_CLIENT_ID };
   if(action === 'initiatives') return { initiatives:[] };
   if(action === 'initiativeLinks') return { links:{} };
-  if(action === 'incomeStatement') throw new Error('Income statement is being rebuilt on the new system');
+  if(action === 'incomeStatement') return await buildIncomeData_(Number(q.get('year')));
   if(action === 'pendingApprovals'){
     const rows = await wCall('pendingApprovals');
     return { pending: rows.map(r=>({ Dept:r.dept, Year:r.year, GLAccount:glLabel_(r.gl,r.account_name), Month:r.month, Amount:r.amount, SubmittedAt:r.updated_at })) };
@@ -1693,7 +1742,7 @@ function toggleIncomeGroup(elId, label){
 function renderIncomeStatementTableInto_(elId, data, fallbackYear){
   const wrap = document.getElementById(elId);
   if(!data.rows || !data.rows.length){
-    wrap.innerHTML = `<tr><td>${emptyState('Run "Build Income Statement sheet" in the Google Sheet for '+fallbackYear+' first')}</td></tr>`;
+    wrap.innerHTML = `<tr><td>${emptyState('No budget or actuals found for '+fallbackYear+' yet')}</td></tr>`;
     return false;
   }
   const header = data.header && data.header.length ? data.header : ['Line', 'Actual '+(fallbackYear-1), 'Actual '+fallbackYear, 'Budget '+fallbackYear, 'Forecast '+fallbackYear];
