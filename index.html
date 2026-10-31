@@ -834,8 +834,7 @@ async function apiPost(payload){
     }
     if(act === 'syncActualsNow'){
       const now = new Date(); const y = now.getFullYear(), m = now.getMonth()+1;
-      if(now.getDate() <= 7){ const pm = m===1?12:m-1, py = m===1?y-1:y; await wCall('syncActuals',{year:py, month:pm}); }
-      await wCall('syncActuals',{year:y, month:m});
+      for(let mm=1; mm<=m; mm++){ await wCall('syncActuals',{year:y, month:mm}); }
       return { ok:true, result:{ year:y, month:m } };
     }
     if(act === 'saveBudget' || act === 'submitBudgetForApproval'){
@@ -1823,8 +1822,8 @@ async function compareIncomeStatements(){
 }
 
 // ---------- Aggregation helpers ----------
-function deptBudgetTotal(dept){ return STATE.budget.filter(r=>r.Dept===dept).reduce((s,r)=>s+Number(r.Amount||0),0); }
-function deptActualTotal(dept){ return STATE.actual.filter(r=>r.Dept===dept).reduce((s,r)=>s+Number(r.Amount||0),0); }
+function deptBudgetTotal(dept){ return STATE.budget.filter(r=>r.Dept===dept && !isRevenueGL(r.GLAccount)).reduce((s,r)=>s+Number(r.Amount||0),0); }
+function deptActualTotal(dept){ return STATE.actual.filter(r=>r.Dept===dept && !isRevenueGL(r.GLAccount)).reduce((s,r)=>s+Number(r.Amount||0),0); }
 function monthTotals(rows){ const arr=Array(12).fill(0); rows.forEach(r=>{ const m=Number(r.Month); if(m>=1&&m<=12) arr[m-1]+=Number(r.Amount||0); }); return arr; }
 
 function variancesByAccount(){
@@ -2238,7 +2237,7 @@ function renderVarianceTable(){
       <td class="num mono">${pct.toFixed(0)}%</td>
       <td><span class="pill ${status.c}">${status.t}</span></td></tr>`;
     if(isOpen){
-      const bRows = STATE.budget.filter(r=>r.Dept===d), aRows = STATE.actual.filter(r=>r.Dept===d);
+      const bRows = STATE.budget.filter(r=>r.Dept===d && !isRevenueGL(r.GLAccount)), aRows = STATE.actual.filter(r=>r.Dept===d && !isRevenueGL(r.GLAccount));
       const glSet = [...new Set([...bRows.map(r=>r.GLAccount), ...aRows.map(r=>r.GLAccount)])].sort();
       glSet.forEach(gl=>{
         const bt = bRows.filter(r=>r.GLAccount===gl).reduce((s,r)=>s+Number(r.Amount||0),0);
