@@ -1208,7 +1208,8 @@ function signOutToGate(){
       document.getElementById('googleSignInSection').style.display='none';
       document.getElementById('googleSignedInBar').style.display='flex';
       document.getElementById('googleSignedInEmail').textContent = sess.email;
-      if((sess.depts||[]).length > 1) showDeptPickModal(sess.depts);
+      if(sess.isFinance){ showDeptPickModal(['Finance'].concat(getDisplayDepts())); }
+      else if((sess.depts||[]).length > 1) showDeptPickModal(sess.depts);
     }
   }catch(e){}
 }
