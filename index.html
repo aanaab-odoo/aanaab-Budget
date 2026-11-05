@@ -11,6 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   :root{
@@ -678,6 +679,55 @@ const CONFIG_JSON_PATH = './config.json';
 let STATE = { year:new Date().getFullYear(), budget:[], actual:[], years:[], googleEmail:null, currentInitiatives:[] };
 let GOOGLE_CLIENT_ID = '';
 let trendChartInst=null, pieChartInst=null, varianceChartInst=null, waterfallChartInst=null;
+
+
+// ---------- Export any table to Excel ----------
+const EXPORT_TABLES = {
+  deptCompareTable:'Budget vs Actual', deptBudgetDetailTable:'Budget Detail', builderCompareTable:'Budget vs Actual', builderDetailTable:'Budget Detail',
+  varianceTable:'Variance Analysis', incomeTable:'Income Statement', incomeNextYearTable:'Income Statement Next Year', incomeCompareTable:'Income Compare',
+  detailTable:'Department Detail', nextYearTable:'Next Year Suggestion', nextYearEditTable:'Next Year Budget', bNextYearEditTable:'Next Year Budget'
+};
+function exportTableToExcel(id){
+  const t = document.getElementById(id);
+  if(!t || !window.XLSX){ toast('Excel export is not ready — check your connection'); return; }
+  const aoa = [];
+  t.querySelectorAll('tr').forEach(tr=>{
+    const row = [];
+    tr.querySelectorAll('th,td').forEach(c=>{
+      const inp = c.querySelector('input,select');
+      let v = inp ? inp.value : c.innerText;
+      v = String(v).replace(/[▸▾✎]/g,'').replace(/\s+/g,' ').trim();
+      const n = v.replace(/,/g,'');
+      if(/^-?\d+(\.\d+)?$/.test(n) && v !== '') row.push(Number(n));
+      else if(/^-?\d+(\.\d+)?%$/.test(n)) row.push(Number(n.slice(0,-1))/100);
+      else row.push(v);
+    });
+    if(row.some(x=>x!=='')) aoa.push(row);
+  });
+  if(!aoa.length){ toast('Nothing to export yet'); return; }
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const widths = []; aoa.forEach(r=>r.forEach((c,i)=>{ widths[i] = Math.max(widths[i]||8, Math.min(48, String(c).length+2)); }));
+  ws['!cols'] = widths.map(w=>({wch:w}));
+  Object.keys(ws).forEach(k=>{ if(k[0]!=='!' && typeof ws[k].v==='number'){ const isPct = false; ws[k].z = '#,##0;[Red]-#,##0'; } });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, (EXPORT_TABLES[id]||'Sheet').slice(0,31));
+  const dept = (STATE.unlockedDept && !/finance/i.test(STATE.unlockedDept)) ? ' - '+STATE.unlockedDept : '';
+  XLSX.writeFile(wb, ((EXPORT_TABLES[id]||id)+' '+STATE.year+dept).replace(/[\\/:*?"<>|]/g,'')+'.xlsx');
+}
+function addExportButtons_(){
+  Object.keys(EXPORT_TABLES).forEach(id=>{
+    const t = document.getElementById(id);
+    if(!t || t.dataset.xl) return;
+    t.dataset.xl = '1';
+    const holder = t.closest('div[style*="overflow-x"]') || t;
+    const b = document.createElement('button');
+    b.className = 'btn ghost'; b.style.cssText = 'padding:5px 12px; font-size:12.5px; margin:0 0 8px 0;';
+    b.textContent = '⬇ Excel';
+    b.onclick = ()=>exportTableToExcel(id);
+    holder.parentNode.insertBefore(b, holder);
+  });
+}
+window.addEventListener('DOMContentLoaded', ()=>setTimeout(addExportButtons_, 0));
 
 function fmt(n){ n = Number(n)||0; return n.toLocaleString('en-US',{maximumFractionDigits:0}); }
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none',2600); }
