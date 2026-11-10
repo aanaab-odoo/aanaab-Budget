@@ -427,6 +427,18 @@
         </div>
       </div>
 
+      <div class="card" id="builderInitCard" style="margin-bottom:18px; display:none;">
+        <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleBuilderInit()">
+          <div style="font-weight:800;">🎯 Initiatives for this department <span id="builderInitCount" style="color:var(--muted); font-weight:600; font-size:12.5px;"></span></div>
+          <span id="builderInitArrow">▾</span>
+        </div>
+        <div id="builderInitBody" style="display:none; margin-top:10px;">
+          <p style="color:var(--muted); font-size:12.5px; margin:0 0 8px;">One initiative per line. They appear on each budget line when building the new-year budget.</p>
+          <textarea id="builderInitText" rows="5" style="width:100%; border:1px solid var(--line); border-radius:8px; padding:10px; font-family:'Manrope',sans-serif; font-size:13.5px;"></textarea>
+          <button class="btn gold" style="margin-top:10px;" onclick="saveBuilderInit()">Save initiatives</button>
+        </div>
+      </div>
+
       <div style="display:flex; gap:8px; margin-bottom:18px;">
         <button class="btn gold" id="bTabCurrentBtn" onclick="switchBuilderTab('current')">This Year</button>
         <button class="btn ghost" id="bTabNextBtn" onclick="switchBuilderTab('next')" style="display:none;">Next Year Budget</button>
@@ -622,6 +634,12 @@
           <div><label>Role</label><select id="newUserRole"><option>editor</option><option>viewer</option><option>admin</option></select></div>
           <div><label>Departments</label><input id="newUserDepts" placeholder="Marketing dep."></div>
           <button class="btn gold" onclick="addUserAdmin()">Add / update</button>
+        </div>
+        <div style="margin-top:20px; padding-top:14px; border-top:1px solid var(--line);">
+          <div style="font-weight:700; margin-bottom:4px;">Bulk add from your old Dept_Access sheet</div>
+          <p style="color:var(--muted); font-size:12.5px; margin:0 0 8px;">Copy the two columns (Dept, Email) from the sheet and paste them here, one pair per line. A person with several rows gets all those departments. A Finance row makes them admin.</p>
+          <textarea id="bulkUsersText" rows="6" style="width:100%; border:1px solid var(--line); border-radius:8px; padding:10px; font-family:'Manrope',sans-serif; font-size:13px;" placeholder="Marketing dep.&#9;name@aanaab.com"></textarea>
+          <button class="btn gold" style="margin-top:10px;" onclick="bulkUsersAdmin()">Import users</button>
         </div>
       </div>
     </div>
@@ -2222,8 +2240,47 @@ function loadBuilderInitiatives(dept){
   if(!dept) return;
   apiGet('action=initiatives&dept='+encodeURIComponent(dept)).then(res=>{
     builderInitiatives = (res.initiatives||[]).map(x=>x.initiative);
+    refreshBuilderInitCard_();
   }).catch(e=>{ builderInitiatives = []; console.error(e); });
 }
+function refreshBuilderInitCard_(){
+  const c = document.getElementById('builderInitCard'); if(!c) return;
+  c.style.display = 'block'; // Builder is a Finance page; the Worker enforces admin on save
+  document.getElementById('builderInitText').value = (builderInitiatives||[]).join('\n');
+  document.getElementById('builderInitCount').textContent = '(' + (builderInitiatives||[]).length + ')';
+}
+function toggleBuilderInit(){
+  const b = document.getElementById('builderInitBody'); const open = b.style.display==='none';
+  b.style.display = open ? 'block' : 'none';
+  document.getElementById('builderInitArrow').textContent = open ? '▴' : '▾';
+}
+async function saveBuilderInit(){
+  const dept = document.getElementById('builderDept').value;
+  const names = document.getElementById('builderInitText').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  try{ const r = await wCall('saveDeptInitiatives',{ dept, names }); toast('Saved '+r.saved+' initiative(s) for '+dept); loadBuilderInitiatives(dept); }
+  catch(e){ toast('Not saved: '+e.message); }
+}
+async function bulkUsersAdmin(){
+  const txt = document.getElementById('bulkUsersText').value;
+  const map = {};
+  txt.split('\n').forEach(line=>{
+    const m = line.match(/[^\s,;\t]+@[^\s,;\t]+/); if(!m) return;
+    const email = m[0].toLowerCase();
+    const dept = line.replace(m[0],'').replace(/^[\s,;\t"]+|[\s,;\t"]+$/g,'').trim();
+    if(!dept) return;
+    (map[email] = map[email] || new Set()).add(dept);
+  });
+  const emails = Object.keys(map);
+  if(!emails.length){ toast('No valid lines found'); return; }
+  let ok = 0;
+  for(const email of emails){
+    const depts = [...map[email]];
+    const fin = depts.some(d=>/^finance/i.test(d));
+    try{ await wCall('setUser',{ email, role: fin?'admin':'editor', depts: fin?'*':depts.join(',') }); ok++; }catch(e){ toast(email+': '+e.message); }
+  }
+  toast('Saved '+ok+' of '+emails.length+' users'); document.getElementById('bulkUsersText').value=''; loadUsersAdmin();
+}
+
 function onBuilderDeptChange(){ builderExpand = { all:false, rows:{} }; renderBuilderDeptView(); checkBuilderExistingNextYearBudget(); loadBuilderInitiatives(document.getElementById('builderDept').value); }
 function onBuilderYearChange(){ loadYear(Number(document.getElementById('builderYear').value)).then(()=>{ populateSelect('builderDept', getDisplayDepts()); renderBuilderDeptView(); checkBuilderExistingNextYearBudget(); loadBuilderInitiatives(document.getElementById('builderDept').value); }); }
 
