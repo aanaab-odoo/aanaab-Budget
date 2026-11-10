@@ -1222,7 +1222,7 @@ const HIDDEN_PICKER_DEPTS = ['b2g', 'project', 'projects'];
 function showDeptPickModal(depts){
   depts = (depts||[]).filter(d => !HIDDEN_PICKER_DEPTS.includes(normDeptKey_(d)));
   document.getElementById('deptPickList').innerHTML = depts.map(d =>
-    `<button class="btn gold" style="width:100%;" onclick="chooseDeptFromGoogle('${d.replace(/'/g,"\\'")}')">${d}</button>`
+    `<button class="btn gold" style="width:100%;" onclick="chooseDeptFromGoogle('${d.replace(/'/g,"\\'")}')">${d==='Finance' ? 'All departments (Finance overview)' : d}</button>`
   ).join('');
   document.getElementById('deptPickModalBg').classList.add('open');
 }
@@ -2302,7 +2302,8 @@ function parseTSV_(text){
   return rows;
 }
 function matchDept_(name){
-  const k = normDeptKey_(name); if(!k) return null;
+  let k = normDeptKey_(name); if(!k) return null;
+  if(k==='qpl') k='qualificationspl';
   const all = allDeptNames_();
   return all.find(d=>normDeptKey_(d)===k) || all.find(d=>normDeptKey_(d).startsWith(k) || k.startsWith(normDeptKey_(d))) || null;
 }
