@@ -623,6 +623,13 @@
         <label style="margin-top:12px;">Initiatives (one per line)</label>
         <textarea id="initTextarea" rows="7" style="width:100%; font-family:'Manrope',sans-serif; border:1px solid var(--line); border-radius:8px; padding:10px; font-size:13.5px;"></textarea>
         <button class="btn gold" style="margin-top:12px;" onclick="saveInitiativesAdmin()">Save initiatives</button>
+        <div style="margin-top:22px; padding-top:14px; border-top:1px solid var(--line);">
+          <div style="font-weight:700; margin-bottom:4px;">Bulk import (all departments at once)</div>
+          <p style="color:var(--muted); font-size:12.5px; margin:0 0 8px;">Paste two columns copied from Excel/Sheets: <b>Dept</b> then <b>Initiative</b>, one initiative per row (multi-line cells are fine). For every department found, its initiatives are replaced by the pasted ones. Short names like Marketing, HR, Product are matched to the real department names.</p>
+          <textarea id="bulkInitText" rows="8" style="width:100%; border:1px solid var(--line); border-radius:8px; padding:10px; font-family:'Manrope',sans-serif; font-size:13px;"></textarea>
+          <button class="btn gold" style="margin-top:10px;" onclick="bulkInitiativesAdmin()">Import initiatives</button>
+          <div id="bulkInitResult" style="margin-top:10px; font-size:13px; line-height:1.8;"></div>
+        </div>
       </div>
 
       <div class="card" style="max-width:760px; margin-top:18px;">
@@ -2279,6 +2286,46 @@ async function bulkUsersAdmin(){
     try{ await wCall('setUser',{ email, role: fin?'admin':'editor', depts: fin?'*':depts.join(',') }); ok++; }catch(e){ toast(email+': '+e.message); }
   }
   toast('Saved '+ok+' of '+emails.length+' users'); document.getElementById('bulkUsersText').value=''; loadUsersAdmin();
+}
+
+function parseTSV_(text){
+  const rows=[]; let row=[], cell='', q=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){cell+='"';i++;} else q=false; } else cell+=c; }
+    else if(c==='"' && cell==='') q=true;
+    else if(c==='\t'){ row.push(cell); cell=''; }
+    else if(c==='\n' || c==='\r'){ if(c==='\r' && text[i+1]==='\n') i++; row.push(cell); rows.push(row); row=[]; cell=''; }
+    else cell+=c;
+  }
+  if(cell!=='' || row.length){ row.push(cell); rows.push(row); }
+  return rows;
+}
+function matchDept_(name){
+  const k = normDeptKey_(name); if(!k) return null;
+  const all = allDeptNames_();
+  return all.find(d=>normDeptKey_(d)===k) || all.find(d=>normDeptKey_(d).startsWith(k) || k.startsWith(normDeptKey_(d))) || null;
+}
+async function bulkInitiativesAdmin(){
+  const rows = parseTSV_(document.getElementById('bulkInitText').value);
+  const byDept = {}, unmatched = new Set();
+  rows.forEach((r,i)=>{
+    if(r.length<2) return;
+    const dn = r[0].trim(), ini = r.slice(1).join(' ').replace(/\s*\n\s*/g,' ').replace(/\s+/g,' ').trim();
+    if(!dn || !ini || (i===0 && /^dept/i.test(dn))) return;
+    const d = matchDept_(dn);
+    if(!d){ unmatched.add(dn); return; }
+    (byDept[d] = byDept[d] || []).push(ini);
+  });
+  const out = document.getElementById('bulkInitResult'); let msgs = [];
+  for(const d of Object.keys(byDept)){
+    try{ await wCall('saveDeptInitiatives',{ dept:d, names:byDept[d] }); msgs.push('✅ '+d+': '+byDept[d].length); }
+    catch(e){ msgs.push('❌ '+d+': '+e.message); }
+  }
+  unmatched.forEach(n=>msgs.push('⚠️ No department matches "'+n+'" (skipped)'));
+  if(!msgs.length) msgs.push('Nothing found — paste Dept and Initiative columns.');
+  out.innerHTML = msgs.join('<br>');
+  loadInitiativesAdmin();
 }
 
 function onBuilderDeptChange(){ builderExpand = { all:false, rows:{} }; renderBuilderDeptView(); checkBuilderExistingNextYearBudget(); loadBuilderInitiatives(document.getElementById('builderDept').value); }
