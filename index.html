@@ -173,6 +173,48 @@
   .dept-card .dept-icon{width:40px; height:40px; border-radius:50%; background:var(--grape-soft); color:var(--grape); font-weight:800; font-size:16px; display:flex; align-items:center; justify-content:center; margin:0 auto 10px;}
   .dept-card.finance .dept-icon{background:var(--teal-soft); color:var(--teal);}
   .dept-card .dept-name{font-weight:700; font-size:14px;}
+
+  /* ---------- Aanaab brand refresh (logo palette: deep purple, grape violet, leaf green) ---------- */
+  :root{ --paper:#F1F6FB; --line:#E1E5F3; --grape-soft:#EEEAFF; --shadow:0 4px 18px rgba(71,24,149,0.07), 0 1px 3px rgba(71,24,149,0.05); --radius:18px; }
+  body{ background:var(--paper); }
+  .sidebar{
+    background:
+      radial-gradient(circle at 88% 6%, rgba(111,82,255,.55) 0, rgba(111,82,255,.55) 16px, transparent 17px),
+      radial-gradient(circle at 70% 11%, rgba(111,82,255,.35) 0, rgba(111,82,255,.35) 11px, transparent 12px),
+      radial-gradient(circle at 92% 14%, rgba(46,189,144,.55) 0, rgba(46,189,144,.55) 9px, transparent 10px),
+      linear-gradient(180deg,#3A1380 0%,#471895 55%,#4E1FA3 100%);
+    box-shadow:4px 0 24px rgba(71,24,149,.18);
+  }
+  .nav-item{ border-radius:12px; border-left:3px solid transparent; }
+  .nav-item:hover{ background:rgba(255,255,255,0.10); }
+  .nav-item.active{ background:linear-gradient(135deg,#6F52FF,#5B3FE0); border-left-color:var(--teal); box-shadow:0 6px 16px rgba(20,8,60,.35); }
+  .page-title{ font-size:28px; letter-spacing:-.2px; }
+  .page-title::after{ content:''; display:block; width:38px; height:4px; border-radius:4px; margin-top:8px; background:linear-gradient(90deg,var(--grape),var(--teal)); }
+  .card{ border:1px solid #E3E8F5; background:#fff; }
+  .grid-4 > .card{ border-top:4px solid var(--grape); }
+  .grid-4 > .card:nth-child(2){ border-top-color:var(--teal); }
+  .grid-4 > .card:nth-child(3){ border-top-color:#A879E0; }
+  .grid-4 > .card:nth-child(4){ border-top-color:var(--ink); }
+  .kpi-value{ color:var(--ink); }
+  .section-title{ color:var(--ink); display:flex; align-items:center; gap:10px; }
+  .section-title::before{ content:''; width:9px; height:9px; border-radius:50%; background:var(--teal); box-shadow:12px 0 0 -2px var(--grape); margin-right:12px; }
+  th{ background:#F6F4FF; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.4px; font-size:11px; border-bottom:2px solid #E6E0FA; }
+  th:first-child{ border-top-left-radius:10px; } th:last-child{ border-top-right-radius:10px; }
+  tr:hover td{ background:#FAF9FF; }
+  .btn{ background:linear-gradient(135deg,#6F52FF,#471895); border-radius:12px; box-shadow:0 3px 10px rgba(71,24,149,.22); }
+  .btn:hover{ background:linear-gradient(135deg,#7C62FF,#5D2BB0); }
+  .btn.gold{ background:linear-gradient(135deg,#34C99C,#22A57D); box-shadow:0 3px 10px rgba(46,189,144,.30); }
+  .btn.gold:hover{ background:linear-gradient(135deg,#3ED6A8,#27B38A); }
+  .btn.ghost{ background:#fff; box-shadow:none; border:1px solid #DCD3F5; color:var(--ink); }
+  .btn.ghost:hover{ background:var(--grape-soft); }
+  .btn.danger{ background:var(--bad-bg); box-shadow:none; }
+  input:focus, select:focus, textarea:focus{ outline:none; border-color:var(--grape); box-shadow:0 0 0 3px rgba(111,82,255,.15); }
+  .year-select{ border-radius:12px; border-color:#DCD3F5; background:#fff; }
+  .therm-track{ background:#E9E5FC; }
+  .dept-card{ border-radius:18px; }
+  .dept-card:hover{ border-color:var(--teal); box-shadow:0 8px 24px rgba(71,24,149,.14); }
+  .toast{ background:linear-gradient(135deg,#471895,#5D2BB0); }
+  .pill.flat{ background:#EEEAFF; }
 </style>
 </head>
 <body>
@@ -559,38 +601,28 @@
     <!-- SETTINGS -->
     <div id="page-setup" style="display:none;">
       <div class="page-title">Settings</div>
-      <div class="card" style="max-width:600px; margin-top:16px;">
-        <label>Web App URL</label>
-        <input id="settingsUrlInput">
-        <button class="btn gold" style="margin-top:12px;" onclick="saveSettingsUrl()">Save and reconnect (this browser only)</button>
-        <div style="margin-top:16px; font-size:12.5px; color:var(--muted); line-height:1.8;">
-          Actuals are read from the <span class="mono">Actual_Data</span> sheet, which should be kept
-          updated monthly by your existing Odoo sync. Budget is read from and written to
-          <span class="mono">Budget_Data</span>.
-        </div>
+      <div class="page-sub">Finance administration — initiatives and who can see which department</div>
+
+      <div class="card" style="max-width:760px; margin-top:18px;">
+        <div style="font-weight:800; margin-bottom:4px;">🎯 Department initiatives</div>
+        <p style="color:var(--muted); font-size:12.5px; line-height:1.8; margin:0 0 12px;">Initiatives a department must deliver this year. Department heads tag each budget line with the initiative(s) it serves when they build the budget. Write one initiative per line.</p>
+        <label>Department</label>
+        <select id="initDeptSelect" onchange="loadInitiativesAdmin()"></select>
+        <label style="margin-top:12px;">Initiatives (one per line)</label>
+        <textarea id="initTextarea" rows="7" style="width:100%; font-family:'Manrope',sans-serif; border:1px solid var(--line); border-radius:8px; padding:10px; font-size:13.5px;"></textarea>
+        <button class="btn gold" style="margin-top:12px;" onclick="saveInitiativesAdmin()">Save initiatives</button>
       </div>
 
-      <div class="card" style="max-width:600px; margin-top:16px;">
-        <div style="font-weight:800; margin-bottom:6px;">🌍 Publish this link for everyone</div>
-        <p style="color:var(--muted); font-size:12.5px; line-height:1.8; margin-top:0;">
-          "Save and reconnect" above only affects your own browser. Use this instead so every department head
-          gets the Web App URL automatically — no setup screen, ever, on any device. You only need this when you
-          first set the tool up, or whenever you create a brand-new Apps Script deployment (a "New version" on
-          the same deployment never changes the URL, so you won't need to redo this for that).
-        </p>
-        <label>GitHub repo (owner/repo)</label>
-        <input id="ghRepoInput" placeholder="aanaab-odoo/aanaab-Budget">
-        <label style="margin-top:10px;">GitHub Personal Access Token</label>
-        <input id="ghTokenInput" type="password" placeholder="ghp_...">
-        <div style="margin-top:4px; font-size:11.5px; color:var(--muted); line-height:1.7;">
-          Stays saved only in your own browser, and is used only to save one small file
-          (<span class="mono">config.json</span>) to your GitHub repo. Create one at
-          github.com → Settings (your profile, not the repo) → Developer settings → Personal access tokens →
-          Fine-grained tokens → give it "Contents: Read and write" access to the
-          <span class="mono">aanaab-Budget</span> repo only.
+      <div class="card" style="max-width:760px; margin-top:18px;">
+        <div style="font-weight:800; margin-bottom:4px;">👥 Users and access</div>
+        <p style="color:var(--muted); font-size:12.5px; line-height:1.8; margin:0 0 12px;">Only people listed here can sign in. <b>Departments</b>: <span class="mono">*</span> for all, or department names separated by commas exactly as they appear in the tool (e.g. <span class="mono">Marketing dep.</span>). Roles: <b>admin</b> (everything), <b>editor</b> (edit own departments), <b>viewer</b> (read only).</p>
+        <table id="usersTable"></table>
+        <div style="display:grid; grid-template-columns:2fr 1fr 2fr auto; gap:8px; align-items:end; margin-top:14px;">
+          <div><label>Google email</label><input id="newUserEmail" placeholder="name@aanaab.com"></div>
+          <div><label>Role</label><select id="newUserRole"><option>editor</option><option>viewer</option><option>admin</option></select></div>
+          <div><label>Departments</label><input id="newUserDepts" placeholder="Marketing dep."></div>
+          <button class="btn gold" onclick="addUserAdmin()">Add / update</button>
         </div>
-        <button class="btn gold" style="margin-top:12px;" onclick="publishApiUrlForEveryone()">Publish for everyone</button>
-        <div id="publishStatusMsg" style="margin-top:10px; font-size:13px; display:none;"></div>
       </div>
     </div>
   </div>
@@ -926,8 +958,21 @@ async function apiGet(params){
   const action = q.get('action');
   if(action === 'years') return { years:[new Date().getFullYear()] };
   if(action === 'googleConfig') return { clientId: WORKER_GOOGLE_CLIENT_ID };
-  if(action === 'initiatives') return { initiatives:[] };
-  if(action === 'initiativeLinks') return { links:{} };
+  if(action === 'initiatives'){
+    if(!ID_TOKEN) return { initiatives:[] };
+    const rows = await wCall('listDeptInitiatives',{ dept:q.get('dept') });
+    return { initiatives: rows.map(r=>({ dept:r.dept, initiative:r.initiative })) };
+  }
+  if(action === 'initiativeLinks'){
+    if(!ID_TOKEN) return { links:{} };
+    const dept = q.get('dept');
+    const rows = await wCall('getInitiativeLinks',{ year:Number(q.get('year')), dept });
+    const labelByCode = {};
+    STATE.budget.filter(r=>r.Dept===dept).forEach(r=>{ labelByCode[glCode_(r.GLAccount)] = r.GLAccount; });
+    const links = {};
+    rows.forEach(r=>{ const k = labelByCode[r.gl] || r.gl; (links[k] = links[k] || []).push(r.initiative); });
+    return { links };
+  }
   if(action === 'incomeStatement') return await buildIncomeData_(Number(q.get('year')));
   if(action === 'pendingApprovals'){
     const rows = await wCall('pendingApprovals');
@@ -971,7 +1016,12 @@ async function apiPost(payload){
       });
       for(const g of Object.values(groups)){
         await wCall('saveBudget', g);
-        if(act === 'submitBudgetForApproval') await wCall('setApproval', { year:g.year, dept:g.dept, status:'submitted' });
+        if(act === 'submitBudgetForApproval'){
+          const by = payload.initiativesByGl || {};
+          const items = Object.keys(by).map(k=>({ gl:splitGl_(k).gl, initiatives:by[k] }));
+          if(items.length) await wCall('saveInitiativeLinks', { year:g.year, dept:g.dept, items });
+          await wCall('setApproval', { year:g.year, dept:g.dept, status:'submitted' });
+        }
       }
       return { ok:true, result:{} };
     }
@@ -979,6 +1029,7 @@ async function apiPost(payload){
       const g = splitGl_(payload.glAccount);
       const rows = (payload.monthlyAmounts||[]).map((v,i)=>({ gl:g.gl, account_name:g.name, month:i+1, amount:v }));
       await wCall('saveBudget', { year:payload.year, dept:payload.dept, rows });
+      if((payload.initiatives||[]).length) await wCall('saveInitiativeLinks', { year:payload.year, dept:payload.dept, items:[{ gl:g.gl, initiatives:payload.initiatives }] });
       return { ok:true, result:{} };
     }
     if(act === 'deleteBudgetLine'){
@@ -1780,12 +1831,61 @@ async function loadYear(year){
 
 function onYearChange(){ loadYear(document.getElementById('yearSelect').value); }
 
+
+// ---------- Settings: initiatives + users ----------
+function allDeptNames_(){
+  const s = new Set(getDisplayDepts());
+  (STATE.budget||[]).forEach(r=>{ if(r.Dept) s.add(r.Dept); });
+  return [...s].filter(d=>!['Expenses','Unassigned'].includes(d)).sort();
+}
+function renderSettingsPage(){
+  const sel = document.getElementById('initDeptSelect'); if(!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = allDeptNames_().map(d=>`<option value="${d.replace(/"/g,'&quot;')}">${d}</option>`).join('');
+  if(cur) sel.value = cur;
+  loadInitiativesAdmin();
+  loadUsersAdmin();
+}
+async function loadInitiativesAdmin(){
+  const dept = document.getElementById('initDeptSelect').value; if(!dept) return;
+  try{
+    const rows = await wCall('listDeptInitiatives',{ dept });
+    document.getElementById('initTextarea').value = rows.map(r=>r.initiative).join('\n');
+  }catch(e){ toast(e.message); }
+}
+async function saveInitiativesAdmin(){
+  const dept = document.getElementById('initDeptSelect').value;
+  const names = document.getElementById('initTextarea').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  try{ const r = await wCall('saveDeptInitiatives',{ dept, names }); toast('Saved '+r.saved+' initiative(s) for '+dept); }
+  catch(e){ toast('Not saved: '+e.message); }
+}
+async function loadUsersAdmin(){
+  const t = document.getElementById('usersTable');
+  try{
+    const rows = await wCall('listUsers');
+    t.innerHTML = '<tr><th>Email</th><th>Role</th><th>Departments</th><th></th></tr>' + rows.map(u=>`<tr><td>${u.email}</td><td>${u.role}</td><td>${u.depts==='*'?'All':u.depts}</td><td><button class="btn danger" style="padding:4px 10px; font-size:12px;" onclick="removeUserAdmin('${u.email}')">Remove</button></td></tr>`).join('');
+  }catch(e){ t.innerHTML = `<tr><td>${e.message}</td></tr>`; }
+}
+async function addUserAdmin(){
+  const email = document.getElementById('newUserEmail').value.trim().toLowerCase();
+  const role = document.getElementById('newUserRole').value;
+  const depts = document.getElementById('newUserDepts').value.trim() || '*';
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ toast('Enter a valid email'); return; }
+  try{ await wCall('setUser',{ email, role, depts }); toast('Saved '+email); document.getElementById('newUserEmail').value=''; document.getElementById('newUserDepts').value=''; loadUsersAdmin(); }
+  catch(e){ toast('Not saved: '+e.message); }
+}
+async function removeUserAdmin(email){
+  if(!confirm('Remove access for '+email+'?')) return;
+  try{ await wCall('deleteUser',{ email }); toast('Removed'); loadUsersAdmin(); }catch(e){ toast(e.message); }
+}
+
 function navTo(page){
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active', el.dataset.page===page));
   ['dashboard','builder','variance','income','detail','approvals','setup'].forEach(p=>{
     document.getElementById('page-'+p).style.display = (p===page)?'block':'none';
   });
   if(page==='builder'){ builderExpand = { all:false, rows:{} }; switchBuilderTab('current'); renderBuilderDeptView(); checkBuilderExistingNextYearBudget(); loadBuilderInitiatives(document.getElementById('builderDept').value); }
+  if(page==='setup') renderSettingsPage();
   if(page==='variance') renderVarianceTable();
   if(page==='income') renderIncomeStatement();
   if(page==='detail') renderDetailTable();
