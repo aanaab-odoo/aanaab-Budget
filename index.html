@@ -331,6 +331,7 @@
 
       <div class="section-title">Create Budget for Next Year</div>
       <div class="card">
+        <div id="dDraftBanner" style="display:none;"></div>
         <p style="color:var(--muted); font-size:13px; margin:0 0 16px;">
           Set next year's total for this department — either a % increase on this year's budget, or a specific number.
           The total gets split across months only — not per line item.
@@ -366,7 +367,13 @@
             using that same account's own monthly pattern from this year. Edit anything you'd like to change.
           </p>
           <div style="overflow-x:auto; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:4px;"><table id="itemLevelTable" style="font-size:12.5px; min-width:1500px;"></table></div>
-          <button class="btn gold" style="margin-top:14px;" onclick="submitItemLevelBudget()">Save & Submit for Finance Approval</button>
+          <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:14px;">
+            <button class="btn ghost" onclick="saveDraft_('d')">💾 Save as draft</button>
+            <button class="btn ghost" onclick="exportDraftExcel_('d')">⬇ Excel</button>
+            <span id="dDraftStatus" style="font-size:12.5px; color:var(--muted);"></span>
+          </div>
+          <button class="btn gold" style="margin-top:14px;" onclick="submitItemLevelBudget()">Submit for Finance Approval</button>
+          <div style="font-size:12px; color:var(--muted); margin-top:6px;">Drafts are private to the department until you submit. Close the page and come back anytime to resume.</div>
           <div id="submitStatusMsg" style="margin-top:10px; font-size:13px; display:none;"></div>
         </div>
       </div>
@@ -456,6 +463,7 @@
 
         <div class="section-title">Create Budget for Next Year</div>
         <div class="card">
+          <div id="bDraftBanner" style="display:none;"></div>
           <p style="color:var(--muted); font-size:13px; margin:0 0 16px;">
             Set next year's total for this department — either a % increase on this year's budget, or a specific number.
             The total gets split across months only — not per line item.
@@ -491,7 +499,12 @@
               using that same account's own monthly pattern from this year. Edit anything you'd like to change.
             </p>
             <div style="overflow-x:auto; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:4px;"><table id="bItemLevelTable" style="font-size:12.5px; min-width:1500px;"></table></div>
-            <button class="btn gold" style="margin-top:14px;" onclick="submitBuilderItemLevelBudget()">Save & Submit for Finance Approval</button>
+          <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:14px;">
+            <button class="btn ghost" onclick="saveDraft_('b')">💾 Save as draft</button>
+            <button class="btn ghost" onclick="exportDraftExcel_('b')">⬇ Excel</button>
+            <span id="bDraftStatus" style="font-size:12.5px; color:var(--muted);"></span>
+          </div>
+            <button class="btn gold" style="margin-top:14px;" onclick="submitBuilderItemLevelBudget()">Submit for Finance Approval</button>
             <div id="bSubmitStatusMsg" style="margin-top:10px; font-size:13px; display:none;"></div>
           </div>
         </div>
@@ -1514,6 +1527,7 @@ function renderDeptView(dept){
   document.getElementById('deptCompareTable').innerHTML = html || `<tr><td>${emptyState('No data')}</td></tr>`;
   document.getElementById('nextYearSuggestionWrap').style.display='none';
   document.getElementById('itemLevelWrap').style.display='none';
+  loadDraft_('d');
   document.getElementById('nextYearPct').value='';
   document.getElementById('nextYearFixed').value='';
 
@@ -1702,6 +1716,7 @@ async function submitItemLevelBudget(){
   toast('Submitting for approval...');
   const res = await apiPost({ action:'submitBudgetForApproval', year: itemLevelBreakdown.year, dept: itemLevelBreakdown.dept, rows, initiativesByGl });
   if(res.ok){
+    wCall('deleteDraft',{ year:itemLevelBreakdown.year, dept:itemLevelBreakdown.dept }).catch(()=>{});
     toast(`✅ Submitted ${itemLevelBreakdown.year} budget for ${itemLevelBreakdown.dept} — pending Finance approval.`);
     setTimeout(()=>{ STATE.unlockedDept = null; showDeptGate(); }, 1400);
   } else {
@@ -2329,6 +2344,83 @@ async function bulkInitiativesAdmin(){
   loadInitiativesAdmin();
 }
 
+// ---------- Drafts: save / resume / Excel for the next-year item-level budget ----------
+const DRAFT_CFG = {
+  d:{ wrap:'itemLevelWrap', inCls:'itemLevelInput', ckCls:'itemLevelInitCheck',
+      get:()=>itemLevelBreakdown, set:v=>{ itemLevelBreakdown=v; renderItemLevelTable(); },
+      dept:()=>STATE.unlockedDept, status:'submitStatusMsg' },
+  b:{ wrap:'bItemLevelWrap', inCls:'bItemLevelInput', ckCls:'bItemLevelInitCheck',
+      get:()=>builderItemLevelBreakdown, set:v=>{ builderItemLevelBreakdown=v; renderBuilderItemLevelTable(); },
+      dept:()=>document.getElementById('builderDept').value, status:'bSubmitStatusMsg' }
+};
+function collectDraft_(k){
+  const c = DRAFT_CFG[k], cur = c.get(); if(!cur) return null;
+  const rows = {};
+  document.querySelectorAll('.'+c.inCls).forEach(inp=>{
+    const gl = inp.dataset.gl;
+    if(!rows[gl]) rows[gl] = { type: inp.dataset.type, monthly: Array(12).fill(0), initiatives: [] };
+    rows[gl].monthly[Number(inp.dataset.month)-1] = Number(inp.value)||0;
+  });
+  document.querySelectorAll('.'+c.ckCls+':checked').forEach(cb=>{ if(rows[cb.dataset.gl]) rows[cb.dataset.gl].initiatives.push(cb.value); });
+  return { dept: cur.dept, year: cur.year, rows };
+}
+async function saveDraft_(k){
+  const d = collectDraft_(k); if(!d){ toast('Nothing to save yet — break the budget down by account first'); return; }
+  try{
+    const r = await wCall('saveDraft',{ year:d.year, dept:d.dept, data:{ rows:d.rows } });
+    const t = new Date(r.updated_at).toLocaleString();
+    document.getElementById(k+'DraftStatus').textContent = '✅ Draft saved '+t;
+    toast('Draft saved — you can close and resume later');
+  }catch(e){ toast('Draft not saved: '+e.message); }
+}
+async function loadDraft_(k){
+  const el = document.getElementById(k+'DraftBanner'); if(!el) return;
+  el.style.display='none'; el.innerHTML='';
+  const dept = DRAFT_CFG[k].dept(); if(!dept || /^finance$/i.test(dept) || !ID_TOKEN) return;
+  const year = STATE.year + 1;
+  try{
+    const r = await wCall('getDraft',{ year, dept });
+    if(!r || !r.data || !r.data.rows) return;
+    el.dataset.payload = JSON.stringify(r.data.rows);
+    el.dataset.year = year; el.dataset.dept = dept;
+    el.style.cssText = 'display:block; background:var(--grape-soft); border:1px solid #D9D0FA; border-radius:12px; padding:12px 16px; margin-bottom:16px;';
+    el.innerHTML = `<b>📝 You have a saved draft of the ${year} budget</b> <span style="color:var(--muted); font-size:12.5px;">(last saved ${new Date(r.updated_at).toLocaleString()} by ${r.updated_by})</span>
+      <div style="margin-top:8px; display:flex; gap:8px;"><button class="btn gold" onclick="resumeDraft_('${k}')">Resume draft</button><button class="btn ghost" onclick="discardDraft_('${k}')">Discard</button></div>`;
+  }catch(e){ console.error(e); }
+}
+function resumeDraft_(k){
+  const el = document.getElementById(k+'DraftBanner');
+  const rows = JSON.parse(el.dataset.payload);
+  DRAFT_CFG[k].set({ dept: el.dataset.dept, year: Number(el.dataset.year), rows });
+  document.getElementById(DRAFT_CFG[k].wrap).style.display='block';
+  document.getElementById(DRAFT_CFG[k].status).style.display='none';
+  el.style.display='none';
+  document.getElementById(DRAFT_CFG[k].wrap).scrollIntoView({behavior:'smooth', block:'start'});
+}
+async function discardDraft_(k){
+  const el = document.getElementById(k+'DraftBanner');
+  if(!confirm('Discard the saved draft? This cannot be undone.')) return;
+  try{ await wCall('deleteDraft',{ year:Number(el.dataset.year), dept:el.dataset.dept }); el.style.display='none'; toast('Draft discarded'); }
+  catch(e){ toast(e.message); }
+}
+function exportDraftExcel_(k){
+  const d = collectDraft_(k);
+  if(!d){ toast('Nothing to export yet — break the budget down by account first'); return; }
+  if(!window.XLSX){ toast('Excel export is not ready — check your connection'); return; }
+  const aoa = [['Line'].concat(MONTHS).concat(['Total','Initiatives'])];
+  const tot = Array(12).fill(0);
+  Object.keys(d.rows).sort().forEach(gl=>{
+    const r = d.rows[gl]; r.monthly.forEach((v,i)=>tot[i]+=v);
+    aoa.push([gl].concat(r.monthly).concat([r.monthly.reduce((s,v)=>s+v,0), r.initiatives.join(' | ')]));
+  });
+  aoa.push(['TOTAL'].concat(tot).concat([tot.reduce((s,v)=>s+v,0), '']));
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:38}].concat(Array(12).fill({wch:12})).concat([{wch:14},{wch:60}]);
+  Object.keys(ws).forEach(a=>{ if(a[0]!=='!' && typeof ws[a].v==='number') ws[a].z = '#,##0;[Red]-#,##0'; });
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, (d.year+' Budget').slice(0,31));
+  XLSX.writeFile(wb, (d.dept+' '+d.year+' budget draft').replace(/[\\/:*?"<>|]/g,'')+'.xlsx');
+}
+
 function onBuilderDeptChange(){ builderExpand = { all:false, rows:{} }; renderBuilderDeptView(); checkBuilderExistingNextYearBudget(); loadBuilderInitiatives(document.getElementById('builderDept').value); }
 function onBuilderYearChange(){ loadYear(Number(document.getElementById('builderYear').value)).then(()=>{ populateSelect('builderDept', getDisplayDepts()); renderBuilderDeptView(); checkBuilderExistingNextYearBudget(); loadBuilderInitiatives(document.getElementById('builderDept').value); }); }
 
@@ -2355,6 +2447,7 @@ function renderBuilderDeptView(){
   document.getElementById('builderCompareTable').innerHTML = html || `<tr><td>${emptyState('No data')}</td></tr>`;
   document.getElementById('bNextYearSuggestionWrap').style.display='none';
   document.getElementById('bItemLevelWrap').style.display='none';
+  loadDraft_('b');
   document.getElementById('bNextYearPct').value='';
   document.getElementById('bNextYearFixed').value='';
 
@@ -2488,6 +2581,7 @@ async function submitBuilderItemLevelBudget(){
   toast('Submitting for approval...');
   const res = await apiPost({ action:'submitBudgetForApproval', year: builderItemLevelBreakdown.year, dept: builderItemLevelBreakdown.dept, rows, initiativesByGl });
   if(res.ok){
+    wCall('deleteDraft',{ year:builderItemLevelBreakdown.year, dept:builderItemLevelBreakdown.dept }).catch(()=>{});
     toast(`✅ Submitted ${builderItemLevelBreakdown.year} budget for ${builderItemLevelBreakdown.dept}`);
     checkBuilderExistingNextYearBudget();
     switchBuilderTab('next');
