@@ -215,6 +215,7 @@
   .dept-card:hover{ border-color:var(--teal); box-shadow:0 8px 24px rgba(71,24,149,.14); }
   .toast{ background:linear-gradient(135deg,#471895,#5D2BB0); }
   .pill.flat{ background:#EEEAFF; }
+  .hideInit .initRow{ display:none; }
 </style>
 </head>
 <body>
@@ -370,6 +371,7 @@
           <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:14px;">
             <button class="btn ghost" onclick="saveDraft_('d')">💾 Save as draft</button>
             <button class="btn ghost" onclick="exportDraftExcel_('d')">⬇ Excel</button>
+            <button class="btn ghost initLocalBtn" onclick="toggleInitLocal_()">🎯 Hide initiatives</button>
             <button class="btn danger" onclick="deleteDraftNow_('d')">🗑 Delete draft &amp; start new</button>
             <span id="dDraftStatus" style="font-size:12.5px; color:var(--muted);"></span>
           </div>
@@ -504,6 +506,7 @@
           <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:14px;">
             <button class="btn ghost" onclick="saveDraft_('b')">💾 Save as draft</button>
             <button class="btn ghost" onclick="exportDraftExcel_('b')">⬇ Excel</button>
+            <button class="btn ghost initLocalBtn" onclick="toggleInitLocal_()">🎯 Hide initiatives</button>
             <button class="btn danger" onclick="deleteDraftNow_('b')">🗑 Delete draft &amp; start new</button>
             <span id="bDraftStatus" style="font-size:12.5px; color:var(--muted);"></span>
           </div>
@@ -1704,11 +1707,12 @@ function renderItemLevelTable(){
       html += `<td class="num"><input type="number" class="mono itemLevelInput" data-gl="${glEsc}" data-type="${rows[gl].type}" data-month="${i+1}" value="${v}" style="width:90px; text-align:left; padding:4px 6px; font-size:12px;"></td>`;
     });
     html += `<td class="num mono" style="font-weight:700;">${fmt(rowTotal)}</td></tr>`;
-    if(initiativesOn_(dept)) html += `<tr><td colspan="${header.length}" style="padding:2px 6px 10px 16px; border-bottom:1px solid var(--line);"><span style="font-size:11px; color:var(--muted); margin-right:8px;">Serves initiative(s):</span>${initiativeCheckboxesHtml(glEsc, rows[gl].initiatives, STATE.currentInitiatives, 'itemLevelInitCheck')}</td></tr>`;
+    html += `<tr class="initRow"><td colspan="${header.length}" style="padding:2px 6px 10px 16px; border-bottom:1px solid var(--line);"><span style="font-size:11px; color:var(--muted); margin-right:8px;">Serves initiative(s):</span>${initiativeCheckboxesHtml(glEsc, rows[gl].initiatives, STATE.currentInitiatives, 'itemLevelInitCheck')}</td></tr>`;
   });
   const grandTotal = totals.reduce((s,v)=>s+v,0);
   html += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>TOTAL — ${dept}</td>${totals.map(v=>`<td class="num mono">${fmt(v)}</td>`).join('')}<td class="num mono">${fmt(grandTotal)}</td></tr>`;
   document.getElementById('itemLevelTable').innerHTML = html;
+  applyInitVis_();
 }
 
 async function submitItemLevelBudget(){
@@ -2483,6 +2487,23 @@ async function deleteDraftNow_(k){
   document.getElementById(k==='d' ? 'nextYearPct' : 'bNextYearPct').scrollIntoView({behavior:'smooth', block:'center'});
 }
 
+function initLocalHidden_(){ try{ return localStorage.getItem('aanaabHideInitiatives')==='1'; }catch(e){ return false; } }
+function applyInitVis_(){
+  [['itemLevelWrap', itemLevelBreakdown], ['bItemLevelWrap', builderItemLevelBreakdown]].forEach(([id, bd])=>{
+    const w = document.getElementById(id); if(!w) return;
+    const allowed = bd ? initiativesOn_(bd.dept) : initiativesOn_();
+    w.classList.toggle('hideInit', !allowed || initLocalHidden_());
+    w.querySelectorAll('.initLocalBtn').forEach(b=>{
+      b.style.display = allowed ? '' : 'none';
+      b.textContent = initLocalHidden_() ? '🎯 Show initiatives' : '🎯 Hide initiatives';
+    });
+  });
+}
+function toggleInitLocal_(){
+  try{ localStorage.setItem('aanaabHideInitiatives', initLocalHidden_() ? '0' : '1'); }catch(e){}
+  applyInitVis_();
+}
+
 function onBuilderDeptChange(){ builderExpand = { all:false, rows:{} }; renderBuilderDeptView(); checkBuilderExistingNextYearBudget(); loadBuilderInitiatives(document.getElementById('builderDept').value); }
 function onBuilderYearChange(){ loadYear(Number(document.getElementById('builderYear').value)).then(()=>{ populateSelect('builderDept', getDisplayDepts()); renderBuilderDeptView(); checkBuilderExistingNextYearBudget(); loadBuilderInitiatives(document.getElementById('builderDept').value); }); }
 
@@ -2621,11 +2642,12 @@ function renderBuilderItemLevelTable(){
       html += `<td class="num"><input type="number" class="mono bItemLevelInput" data-gl="${glEsc}" data-type="${rows[gl].type}" data-month="${i+1}" value="${v}" style="width:90px; text-align:left; padding:4px 6px; font-size:12px;"></td>`;
     });
     html += `<td class="num mono" style="font-weight:700;">${fmt(rowTotal)}</td></tr>`;
-    if(initiativesOn_(dept)) html += `<tr><td colspan="${header.length}" style="padding:2px 6px 10px 16px; border-bottom:1px solid var(--line);"><span style="font-size:11px; color:var(--muted); margin-right:8px;">Serves initiative(s):</span>${initiativeCheckboxesHtml(glEsc, rows[gl].initiatives, builderInitiatives, 'bItemLevelInitCheck')}</td></tr>`;
+    html += `<tr class="initRow"><td colspan="${header.length}" style="padding:2px 6px 10px 16px; border-bottom:1px solid var(--line);"><span style="font-size:11px; color:var(--muted); margin-right:8px;">Serves initiative(s):</span>${initiativeCheckboxesHtml(glEsc, rows[gl].initiatives, builderInitiatives, 'bItemLevelInitCheck')}</td></tr>`;
   });
   const grandTotal = totals.reduce((s,v)=>s+v,0);
   html += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>TOTAL — ${dept}</td>${totals.map(v=>`<td class="num mono">${fmt(v)}</td>`).join('')}<td class="num mono">${fmt(grandTotal)}</td></tr>`;
   document.getElementById('bItemLevelTable').innerHTML = html;
+  applyInitVis_();
 }
 
 async function submitBuilderItemLevelBudget(){
