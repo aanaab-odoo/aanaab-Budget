@@ -440,6 +440,7 @@
           <span id="builderInitArrow">▾</span>
         </div>
         <div id="builderInitBody" style="display:none; margin-top:10px;">
+          <div style="margin-bottom:10px;"><label style="display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:700; cursor:pointer;"><input type="checkbox" class="initiativesToggle" checked onchange="setInitiativesVisible_(this.checked)"> Show initiatives to departments when building the budget</label></div>
           <p style="color:var(--muted); font-size:12.5px; margin:0 0 8px;">One initiative per line. They appear on each budget line when building the new-year budget.</p>
           <textarea id="builderInitText" rows="5" style="width:100%; border:1px solid var(--line); border-radius:8px; padding:10px; font-family:'Manrope',sans-serif; font-size:13.5px;"></textarea>
           <button class="btn gold" style="margin-top:10px;" onclick="saveBuilderInit()">Save initiatives</button>
@@ -629,7 +630,8 @@
       <div class="page-sub">Finance administration — initiatives and who can see which department</div>
 
       <div class="card" style="max-width:760px; margin-top:18px;">
-        <div style="font-weight:800; margin-bottom:4px;">🎯 Department initiatives</div>
+        <div style="font-weight:800; margin-bottom:8px;">🎯 Department initiatives</div>
+        <div style="margin-bottom:12px;"><label style="display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:700; cursor:pointer;"><input type="checkbox" class="initiativesToggle" checked onchange="setInitiativesVisible_(this.checked)"> Show initiatives to departments when building the budget</label></div>
         <p style="color:var(--muted); font-size:12.5px; line-height:1.8; margin:0 0 12px;">Initiatives a department must deliver this year. Department heads tag each budget line with the initiative(s) it serves when they build the budget. Write one initiative per line.</p>
         <label>Department</label>
         <select id="initDeptSelect" onchange="loadInitiativesAdmin()"></select>
@@ -716,7 +718,7 @@
       <option value="OtherExpense">Other Expense</option>
     </select>
 
-    <label style="margin-top:10px;">Which initiative(s) does this line serve?</label>
+    <label id="deptLineInitLabel" style="margin-top:10px;">Which initiative(s) does this line serve?</label>
     <div id="deptLineInitiatives" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:6px;"></div>
 
     <div style="display:flex; gap:8px; margin-top:14px;">
@@ -914,6 +916,7 @@ function glLabel_(gl, name){ return name ? (gl+' '+name) : gl; }
 async function workerPostLogin(){
   try{
     try{ STATE.settings = await wCall('getSettings'); }catch(e){ STATE.settings = {}; }
+    setTimeout(()=>{ try{ syncInitiativesToggle_(); }catch(e){} }, 0);
     const yrs = await wCall('years');
     const cy = new Date().getFullYear();
     const set = new Set((yrs||[]).map(Number)); set.add(cy);
@@ -1287,6 +1290,7 @@ function unlockDept(dept){
 function loadDeptInitiatives(dept){
   document.getElementById('deptInitiativesBtn').style.display='none';
   document.getElementById('deptInitiativesBanner').style.display='none';
+  if(!initiativesOn_()){ STATE.currentInitiatives = []; return; }
   apiGet('action=initiatives&dept='+encodeURIComponent(dept)).then(res=>{
     STATE.currentInitiatives = (res.initiatives||[]).map(x=>x.initiative);
     if(STATE.currentInitiatives.length === 0) return;
@@ -1549,6 +1553,9 @@ function openDeptAddLineModal(){
   document.getElementById('deptLineInitiatives').innerHTML = STATE.currentInitiatives.length
     ? STATE.currentInitiatives.map(n=>`<label style="display:flex; align-items:center; gap:6px; font-weight:500; font-size:13px;"><input type="checkbox" class="deptLineInitCheck" value="${n.replace(/"/g,'&quot;')}"> ${n}</label>`).join('')
     : `<span style="color:var(--muted); font-size:13px;">No initiatives set up for this department yet.</span>`;
+  const _io = initiativesOn_();
+  document.getElementById('deptLineInitLabel').style.display = _io ? '' : 'none';
+  document.getElementById('deptLineInitiatives').style.display = _io ? 'flex' : 'none';
   document.getElementById('deptAddLineModalBg').classList.add('open');
 }
 function closeDeptAddLineModal(){ document.getElementById('deptAddLineModalBg').classList.remove('open'); }
@@ -1694,7 +1701,7 @@ function renderItemLevelTable(){
       html += `<td class="num"><input type="number" class="mono itemLevelInput" data-gl="${glEsc}" data-type="${rows[gl].type}" data-month="${i+1}" value="${v}" style="width:90px; text-align:left; padding:4px 6px; font-size:12px;"></td>`;
     });
     html += `<td class="num mono" style="font-weight:700;">${fmt(rowTotal)}</td></tr>`;
-    html += `<tr><td colspan="${header.length}" style="padding:2px 6px 10px 16px; border-bottom:1px solid var(--line);"><span style="font-size:11px; color:var(--muted); margin-right:8px;">Serves initiative(s):</span>${initiativeCheckboxesHtml(glEsc, rows[gl].initiatives, STATE.currentInitiatives, 'itemLevelInitCheck')}</td></tr>`;
+    if(initiativesOn_()) html += `<tr><td colspan="${header.length}" style="padding:2px 6px 10px 16px; border-bottom:1px solid var(--line);"><span style="font-size:11px; color:var(--muted); margin-right:8px;">Serves initiative(s):</span>${initiativeCheckboxesHtml(glEsc, rows[gl].initiatives, STATE.currentInitiatives, 'itemLevelInitCheck')}</td></tr>`;
   });
   const grandTotal = totals.reduce((s,v)=>s+v,0);
   html += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>TOTAL — ${dept}</td>${totals.map(v=>`<td class="num mono">${fmt(v)}</td>`).join('')}<td class="num mono">${fmt(grandTotal)}</td></tr>`;
@@ -1879,6 +1886,7 @@ function allDeptNames_(){
   return [...s].filter(d=>!['Expenses','Unassigned'].includes(d)).sort();
 }
 function renderSettingsPage(){
+  syncInitiativesToggle_();
   const sel = document.getElementById('initDeptSelect'); if(!sel) return;
   const cur = sel.value;
   sel.innerHTML = allDeptNames_().map(d=>`<option value="${d.replace(/"/g,'&quot;')}">${d}</option>`).join('');
@@ -2267,6 +2275,7 @@ function loadBuilderInitiatives(dept){
 }
 function refreshBuilderInitCard_(){
   const c = document.getElementById('builderInitCard'); if(!c) return;
+  syncInitiativesToggle_();
   c.style.display = 'block'; // Builder is a Finance page; the Worker enforces admin on save
   document.getElementById('builderInitText').value = (builderInitiatives||[]).join('\n');
   document.getElementById('builderInitCount').textContent = '(' + (builderInitiatives||[]).length + ')';
@@ -2421,6 +2430,19 @@ function exportDraftExcel_(k){
   XLSX.writeFile(wb, (d.dept+' '+d.year+' budget draft').replace(/[\\/:*?"<>|]/g,'')+'.xlsx');
 }
 
+function initiativesOn_(){ return !(STATE.settings && STATE.settings.show_initiatives === '0'); }
+async function setInitiativesVisible_(on){
+  const res = await apiPost({ action:'setSetting', key:'show_initiatives', value: on ? '1' : '0' });
+  if(!res.ok){ toast('Not saved: '+res.error); syncInitiativesToggle_(); return; }
+  ['d','b'].forEach(k=>{ const d = collectDraft_(k); if(d) DRAFT_CFG[k].set({ dept:d.dept, year:d.year, rows:d.rows }); });
+  if(STATE.unlockedDept && !/^finance$/i.test(STATE.unlockedDept)) loadDeptInitiatives(STATE.unlockedDept);
+  syncInitiativesToggle_();
+  toast(on ? 'Initiatives are now shown' : 'Initiatives are now hidden');
+}
+function syncInitiativesToggle_(){
+  document.querySelectorAll('.initiativesToggle').forEach(cb=>{ cb.checked = initiativesOn_(); });
+}
+
 function onBuilderDeptChange(){ builderExpand = { all:false, rows:{} }; renderBuilderDeptView(); checkBuilderExistingNextYearBudget(); loadBuilderInitiatives(document.getElementById('builderDept').value); }
 function onBuilderYearChange(){ loadYear(Number(document.getElementById('builderYear').value)).then(()=>{ populateSelect('builderDept', getDisplayDepts()); renderBuilderDeptView(); checkBuilderExistingNextYearBudget(); loadBuilderInitiatives(document.getElementById('builderDept').value); }); }
 
@@ -2559,7 +2581,7 @@ function renderBuilderItemLevelTable(){
       html += `<td class="num"><input type="number" class="mono bItemLevelInput" data-gl="${glEsc}" data-type="${rows[gl].type}" data-month="${i+1}" value="${v}" style="width:90px; text-align:left; padding:4px 6px; font-size:12px;"></td>`;
     });
     html += `<td class="num mono" style="font-weight:700;">${fmt(rowTotal)}</td></tr>`;
-    html += `<tr><td colspan="${header.length}" style="padding:2px 6px 10px 16px; border-bottom:1px solid var(--line);"><span style="font-size:11px; color:var(--muted); margin-right:8px;">Serves initiative(s):</span>${initiativeCheckboxesHtml(glEsc, rows[gl].initiatives, builderInitiatives, 'bItemLevelInitCheck')}</td></tr>`;
+    if(initiativesOn_()) html += `<tr><td colspan="${header.length}" style="padding:2px 6px 10px 16px; border-bottom:1px solid var(--line);"><span style="font-size:11px; color:var(--muted); margin-right:8px;">Serves initiative(s):</span>${initiativeCheckboxesHtml(glEsc, rows[gl].initiatives, builderInitiatives, 'bItemLevelInitCheck')}</td></tr>`;
   });
   const grandTotal = totals.reduce((s,v)=>s+v,0);
   html += `<tr style="font-weight:800; border-top:2px solid var(--line);"><td>TOTAL — ${dept}</td>${totals.map(v=>`<td class="num mono">${fmt(v)}</td>`).join('')}<td class="num mono">${fmt(grandTotal)}</td></tr>`;
